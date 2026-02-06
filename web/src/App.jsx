@@ -3,12 +3,39 @@ import { useState, useEffect, useRef, useReducer, createContext, useContext } fr
 // Context
 const DashboardContext = createContext();
 
+// Load persisted mode from localStorage
+const savedMode = typeof window !== 'undefined' ? localStorage.getItem('dashboardMode') || 'lurk' : 'lurk';
+
+// Load persisted messages from localStorage
+const loadPersistedMessages = () => {
+  try {
+    const saved = localStorage.getItem('dashboardMessages');
+    return saved ? JSON.parse(saved) : {};
+  } catch { return {}; }
+};
+
+// Save messages to localStorage (debounced)
+let saveTimeout = null;
+const persistMessages = (messages) => {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    try {
+      // Only keep last 100 messages per channel to avoid storage limits
+      const trimmed = {};
+      for (const [ch, msgs] of Object.entries(messages)) {
+        trimmed[ch] = msgs.slice(-100);
+      }
+      localStorage.setItem('dashboardMessages', JSON.stringify(trimmed));
+    } catch (e) { console.warn('Failed to persist messages:', e); }
+  }, 1000);
+};
+
 const initialState = {
   connected: false,
-  mode: 'lurk',
+  mode: savedMode,
   agents: {},
   channels: {},
-  messages: {},
+  messages: loadPersistedMessages(),
   leaderboard: [],
   skills: [],
   proposals: {},
@@ -20,31 +47,56 @@ const initialState = {
 
 function reducer(state, action) {
   switch (action.type) {
-    case 'STATE_SYNC':
+    case 'STATE_SYNC': {
+      // Merge server messages with locally persisted messages
+      const serverMsgs = action.data.messages || {};
+      const mergedMessages = { ...state.messages };
+
+      for (const [channel, msgs] of Object.entries(serverMsgs)) {
+        const existing = mergedMessages[channel] || [];
+        const existingIds = new Set(existing.map(m => m.id || `${m.ts}-${m.from}`));
+        const newMsgs = msgs.filter(m => !existingIds.has(m.id || `${m.ts}-${m.from}`));
+        mergedMessages[channel] = [...existing, ...newMsgs].sort((a, b) => a.ts - b.ts).slice(-200);
+      }
+
+      persistMessages(mergedMessages);
+
       return {
         ...state,
         connected: true,
+        // Keep the persisted mode instead of resetting to lurk
         agents: Object.fromEntries(action.data.agents.map(a => [a.id, a])),
         channels: Object.fromEntries(action.data.channels.map(c => [c.name, c])),
-        messages: action.data.messages || {},
+        messages: mergedMessages,
         leaderboard: action.data.leaderboard || [],
         skills: action.data.skills || [],
         proposals: Object.fromEntries((action.data.proposals || []).map(p => [p.id, p])),
         dashboardAgent: action.data.dashboardAgent
       };
+    }
     case 'CONNECTED':
       return { ...state, connected: true, dashboardAgent: action.data?.dashboardAgent };
     case 'DISCONNECTED':
       return { ...state, connected: false };
-    case 'MESSAGE':
+    case 'MESSAGE': {
       const channel = action.data.to;
-      return {
-        ...state,
-        messages: {
-          ...state.messages,
-          [channel]: [...(state.messages[channel] || []), action.data]
-        }
+      const existingMsgs = state.messages[channel] || [];
+      // Deduplicate by id or by ts+from+content
+      const msgKey = action.data.id || `${action.data.ts}-${action.data.from}`;
+      const isDuplicate = existingMsgs.some(m =>
+        (m.id && m.id === action.data.id) ||
+        (m.ts === action.data.ts && m.from === action.data.from && m.content === action.data.content)
+      );
+      if (isDuplicate) return state;
+
+      const newMessages = {
+        ...state.messages,
+        [channel]: [...existingMsgs, action.data]
       };
+      persistMessages(newMessages);
+
+      return { ...state, messages: newMessages };
+    }
     case 'AGENT_UPDATE':
       return {
         ...state,
@@ -60,6 +112,10 @@ function reducer(state, action) {
     case 'SKILLS_UPDATE':
       return { ...state, skills: action.data };
     case 'SET_MODE':
+      // Persist mode to localStorage
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dashboardMode', action.mode);
+      }
       return { ...state, mode: action.mode };
     case 'SELECT_CHANNEL':
       return { ...state, selectedChannel: action.channel };
@@ -91,8 +147,10 @@ function useWebSocket(dispatch) {
   const [send, setSend] = useState(() => () => {});
 
   useEffect(() => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    // In development, connect directly to backend
+    const wsUrl = import.meta.env.DEV
+      ? 'ws://localhost:3000/ws'
+      : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
     function connect() {
       ws.current = new WebSocket(wsUrl);
@@ -134,6 +192,13 @@ function useWebSocket(dispatch) {
             break;
           case 'mode_changed':
             dispatch({ type: 'SET_MODE', mode: msg.data.mode });
+            break;
+          case 'error':
+            console.error('Server error:', msg.data?.code, msg.data?.message);
+            // If server says we're in lurk mode, sync the frontend state
+            if (msg.data?.code === 'LURK_MODE') {
+              dispatch({ type: 'SET_MODE', mode: 'lurk' });
+            }
             break;
         }
       };
@@ -237,8 +302,13 @@ function Sidebar({ state, dispatch }) {
 
 function MessageFeed({ state, send }) {
   const [input, setInput] = useState('');
+  const [hideServer, setHideServer] = useState(true);
   const messagesEndRef = useRef(null);
-  const messages = state.messages[state.selectedChannel] || [];
+  const allMessages = state.messages[state.selectedChannel] || [];
+  // Filter out @server messages if hideServer is true
+  const messages = hideServer
+    ? allMessages.filter(m => m.from !== '@server')
+    : allMessages;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -255,13 +325,21 @@ function MessageFeed({ state, send }) {
     <div className="message-feed">
       <div className="feed-header">
         <span className="channel-title">{state.selectedChannel || 'Select a channel'}</span>
+        <label className="server-toggle">
+          <input
+            type="checkbox"
+            checked={hideServer}
+            onChange={(e) => setHideServer(e.target.checked)}
+          />
+          Hide @server
+        </label>
       </div>
       <div className="messages">
         {messages.map((msg, i) => (
           <div key={msg.id || i} className="message">
             <span className="time">[{formatTime(msg.ts)}]</span>
-            <span className="from" style={{ color: agentColor(msg.fromNick || msg.from) }}>
-              &lt;{msg.fromNick || msg.from}&gt;
+            <span className="from" style={{ color: agentColor(state.agents[msg.from]?.nick || msg.fromNick || msg.from) }}>
+              &lt;{state.agents[msg.from]?.nick || msg.fromNick || msg.from}&gt;
             </span>
             <span className="content">{msg.content}</span>
           </div>
@@ -360,6 +438,9 @@ function RightPanel({ state, dispatch, send }) {
 
   // Agent detail
   const agent = state.selectedAgent;
+  const [renameValue, setRenameValue] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
+
   if (!agent) {
     return (
       <div className="right-panel">
@@ -368,13 +449,41 @@ function RightPanel({ state, dispatch, send }) {
     );
   }
 
+  const handleRename = (e) => {
+    e.preventDefault();
+    if (renameValue.trim()) {
+      send({ type: 'set_agent_name', data: { agentId: agent.id, name: renameValue.trim() } });
+      setIsRenaming(false);
+      setRenameValue('');
+    }
+  };
+
   return (
     <div className="right-panel">
       <h3>AGENT DETAIL</h3>
       <div className="agent-detail">
-        <div className="detail-nick" style={{ color: agentColor(agent.nick || agent.id) }}>
-          {agent.nick || agent.id}
-        </div>
+        {isRenaming ? (
+          <form onSubmit={handleRename} className="rename-form">
+            <input
+              type="text"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              placeholder="Enter display name..."
+              autoFocus
+            />
+            <button type="submit">Save</button>
+            <button type="button" onClick={() => setIsRenaming(false)}>Cancel</button>
+          </form>
+        ) : (
+          <div
+            className="detail-nick clickable"
+            style={{ color: agentColor(agent.nick || agent.id) }}
+            onClick={() => { setIsRenaming(true); setRenameValue(agent.nick || ''); }}
+            title="Click to rename"
+          >
+            {agent.nick || agent.id} ✏️
+          </div>
+        )}
         <div className="detail-id">{agent.id}</div>
         <div className={`detail-status ${agent.online ? 'online' : 'offline'}`}>
           {agent.online ? 'Online' : 'Offline'}
