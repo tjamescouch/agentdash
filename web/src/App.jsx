@@ -157,6 +157,11 @@ function useWebSocket(dispatch) {
 
       ws.current.onopen = () => {
         console.log('WebSocket connected');
+        // Sync saved mode to server on connect/reconnect
+        const savedMode = localStorage.getItem('dashboardMode');
+        if (savedMode && savedMode !== 'lurk') {
+          ws.current.send(JSON.stringify({ type: 'set_mode', data: { mode: savedMode } }));
+        }
       };
 
       ws.current.onmessage = (e) => {

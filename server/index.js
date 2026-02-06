@@ -487,6 +487,29 @@ function handleDashboardMessage(client, msg) {
 const app = express();
 const server = createServer(app);
 
+// Security headers
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set({
+    'Strict-Transport-Security': 'max-age=63072000; includeSubDomains',
+    'X-Frame-Options': 'DENY',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'X-XSS-Protection': '0',
+    'Content-Security-Policy': "default-src 'self'; connect-src 'self' wss: ws:; script-src 'self'; style-src 'self' 'unsafe-inline'"
+  });
+  next();
+});
+
+// Block sensitive paths before static/SPA
+app.use((req, res, next) => {
+  const blocked = /^\/(\.env|\.git(\/|$)|config\.(json|yaml|yml))/i;
+  if (blocked.test(req.path)) {
+    return res.status(404).end();
+  }
+  next();
+});
+
 // Health endpoint
 app.get('/api/health', (req, res) => {
   res.json({
@@ -507,29 +530,57 @@ app.get('*', (req, res) => {
 });
 
 // Dashboard WebSocket
-const wss = new WebSocketServer({ server, path: '/ws' });
+const MAX_WS_MESSAGE_SIZE = 64 * 1024; // 64kb
+const MAX_CONNECTIONS_PER_IP = 10;
+const RATE_LIMIT_WINDOW_MS = 10000; // 10s
+const RATE_LIMIT_MAX_MESSAGES = 50; // 50 messages per window
+const ipConnectionCounts = new Map();
 
-wss.on('connection', (ws) => {
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_WS_MESSAGE_SIZE });
+
+wss.on('connection', (ws, req) => {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress;
+  const currentCount = ipConnectionCounts.get(ip) || 0;
+
+  if (currentCount >= MAX_CONNECTIONS_PER_IP) {
+    ws.send(JSON.stringify({ type: 'error', data: { code: 'TOO_MANY_CONNECTIONS', message: 'Connection limit per IP exceeded' } }));
+    ws.close();
+    return;
+  }
+
   if (dashboardClients.size >= 100) {
     ws.send(JSON.stringify({ type: 'error', data: { code: 'SERVER_FULL', message: 'Too many clients' } }));
     ws.close();
     return;
   }
 
+  ipConnectionCounts.set(ip, currentCount + 1);
+
   const client = {
     ws,
+    ip,
     id: `client-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     mode: 'lurk',
     subscriptions: new Set(),
-    lastPing: Date.now()
+    lastPing: Date.now(),
+    messageTimestamps: []
   };
   dashboardClients.add(client);
-  console.log(`Dashboard client connected: ${client.id}`);
+  console.log(`Dashboard client connected: ${client.id} from ${ip}`);
 
   // Send initial state
   ws.send(JSON.stringify({ type: 'state_sync', data: getStateSnapshot() }));
 
   ws.on('message', (data) => {
+    // Rate limiting
+    const now = Date.now();
+    client.messageTimestamps = client.messageTimestamps.filter(t => now - t < RATE_LIMIT_WINDOW_MS);
+    if (client.messageTimestamps.length >= RATE_LIMIT_MAX_MESSAGES) {
+      ws.send(JSON.stringify({ type: 'error', data: { code: 'RATE_LIMITED', message: 'Too many messages, slow down' } }));
+      return;
+    }
+    client.messageTimestamps.push(now);
+
     try {
       const msg = JSON.parse(data.toString());
       if (msg.type === 'pong') {
@@ -544,6 +595,12 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     dashboardClients.delete(client);
+    const count = ipConnectionCounts.get(client.ip) || 1;
+    if (count <= 1) {
+      ipConnectionCounts.delete(client.ip);
+    } else {
+      ipConnectionCounts.set(client.ip, count - 1);
+    }
     console.log(`Dashboard client disconnected: ${client.id}`);
   });
 });
