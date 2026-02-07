@@ -1,29 +1,20 @@
 {
   "name": "agentchat-dashboard",
   "version": "1.0.0",
+  "private": true,
   "description": "Real-time web dashboard for AgentChat monitoring",
-  "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "concurrently \"npm run dev:server\" \"npm run dev:web\"",
-    "dev:server": "nodemon server/index.js",
-    "dev:web": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "ws": "^8.14.2",
-    "tweetnacl": "^1.0.3",
-    "tweetnacl-util": "^0.15.1"
+    "start": "cd server && npm start",
+    "dev": "concurrently \"cd server && npm run dev\" \"cd web && npm run dev\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:web": "cd web && npm run dev",
+    "build": "cd web && npm run build",
+    "build:server": "cd server && npm run build",
+    "typecheck": "cd web && npm run typecheck && cd ../server && npm run typecheck",
+    "install:all": "cd server && npm install && cd ../web && npm install"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.0",
-    "concurrently": "^8.2.2",
-    "nodemon": "^3.0.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "vite": "^5.0.0"
+    "concurrently": "^8.2.2"
   },
   "engines": {
     "node": ">=18.0.0"
