@@ -74,6 +74,7 @@ interface DashboardState {
   selectedAgent: Agent | null;
   rightPanel: string;
   dashboardAgent: DashboardAgent | null;
+  unreadCounts: Record<string, number>;
 }
 
 type DashboardAction =
@@ -151,7 +152,8 @@ const initialState: DashboardState = {
   selectedChannel: '#general',
   selectedAgent: null,
   rightPanel: 'proposals',
-  dashboardAgent: null
+  dashboardAgent: null,
+  unreadCounts: {}
 };
 
 function reducer(state: DashboardState, action: DashboardAction): DashboardState {
@@ -199,7 +201,10 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
         [channel]: [...existingMsgs, action.data]
       };
       persistMessages(newMessages);
-      return { ...state, messages: newMessages };
+      const newUnread = channel !== state.selectedChannel
+        ? { ...state.unreadCounts, [channel]: (state.unreadCounts[channel] || 0) + 1 }
+        : state.unreadCounts;
+      return { ...state, messages: newMessages, unreadCounts: newUnread };
     }
     case 'AGENT_UPDATE':
       return {
@@ -220,8 +225,11 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
         localStorage.setItem('dashboardMode', action.mode);
       }
       return { ...state, mode: action.mode };
-    case 'SELECT_CHANNEL':
-      return { ...state, selectedChannel: action.channel };
+    case 'SELECT_CHANNEL': {
+      const clearedUnread = { ...state.unreadCounts };
+      delete clearedUnread[action.channel];
+      return { ...state, selectedChannel: action.channel, unreadCounts: clearedUnread };
+    }
     case 'SELECT_AGENT':
       return { ...state, selectedAgent: action.agent, rightPanel: 'detail' };
     case 'SET_RIGHT_PANEL':
@@ -407,6 +415,9 @@ function Sidebar({ state, dispatch }: { state: DashboardState; dispatch: React.D
               onClick={() => dispatch({ type: 'SELECT_CHANNEL', channel: channel.name })}
             >
               <span className="channel-name">{channel.name}</span>
+              {state.unreadCounts[channel.name] > 0 && (
+                <span className="unread-badge">{state.unreadCounts[channel.name]}</span>
+              )}
               <span className="member-count">{channel.members?.length || 0}</span>
             </div>
           ))}

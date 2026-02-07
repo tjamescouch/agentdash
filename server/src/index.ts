@@ -561,7 +561,11 @@ function handleDashboardMessage(client: DashboardClient, msg: DashboardMessage):
         return;
       }
       {
-        const content = msg.data.content as string;
+        const content = (msg.data.content as string || '').trim();
+        if (!content || content.length > 4000) {
+          client.ws.send(JSON.stringify({ type: 'error', data: { code: 'INVALID_MESSAGE', message: 'Message empty or too long (max 4000)' } }));
+          return;
+        }
         const sig = signMessage(content);
         send({ type: 'MSG', to: msg.data.to, content, sig });
         client.ws.send(JSON.stringify({ type: 'message_sent', data: { success: true } }));
@@ -602,8 +606,11 @@ function handleDashboardMessage(client: DashboardClient, msg: DashboardMessage):
       break;
 
     case 'set_agent_name': {
-      const { agentId, name } = msg.data as { agentId: string; name: string };
-      if (agentId && name) {
+      const { agentId, name: rawName } = msg.data as { agentId: string; name: string };
+      if (!agentId || typeof agentId !== 'string') break;
+      if (!rawName || typeof rawName !== 'string') break;
+      const name = rawName.trim().slice(0, 50).replace(/[<>&"']/g, '');
+      if (name) {
         agentNameOverrides[agentId] = name;
 
         try {
@@ -645,14 +652,14 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'X-XSS-Protection': '0',
-    'Content-Security-Policy': "default-src 'self'; connect-src 'self' wss: ws:; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    'Content-Security-Policy': "default-src 'self'; connect-src 'self' wss: ws:; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com"
   });
   next();
 });
 
 // Block sensitive paths before static/SPA
 app.use((req: Request, res: Response, next: NextFunction) => {
-  const blocked = /^\/(\.env|\.git(\/|$)|config\.(json|yaml|yml))/i;
+  const blocked = /^\/(\.env|\.git(\/|$)|config\.(json|yaml|yml)|\.dashboard-identity|agent-names|swagger|api-docs|graphql|debug|__debug__|actuator|server-status|phpinfo)/i;
   if (blocked.test(req.path)) {
     return res.status(404).end();
   }
@@ -663,10 +670,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
     status: 'ok',
-    connected: state.connected,
-    uptime: process.uptime(),
-    agents: state.agents.size,
-    channels: state.channels.size
+    connected: state.connected
   });
 });
 

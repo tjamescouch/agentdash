@@ -266,7 +266,7 @@ body {
 }
 
 .message .content {
-  color: #ccc;
+  color: #b0b0b0;
 }
 
 .input-bar {
@@ -452,7 +452,7 @@ body {
 
 .proposal-task {
   margin-bottom: 8px;
-  color: #ccc;
+  color: #b0b0b0;
 }
 
 .proposal-parties {
@@ -604,4 +604,137 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
+}
+
+/* ============ WOW EFFECTS ============ */
+
+/* CRT Scanline Overlay */
+.dashboard::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Phosphor text glow */
+body {
+  text-shadow: 0 0 1px rgba(0, 255, 65, 0.15);
+}
+
+/* Logo glow */
+.logo {
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  text-shadow: 0 0 10px rgba(0, 255, 65, 0.5), 0 0 20px rgba(0, 255, 65, 0.2);
+}
+
+/* Pulsing connection status */
+.status.online {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 5px rgba(0, 255, 65, 0.5); }
+  50% { box-shadow: 0 0 15px rgba(0, 255, 65, 0.8), 0 0 30px rgba(0, 255, 65, 0.3); }
+}
+
+/* Agent online dot breathing */
+.dot.online {
+  animation: dot-pulse 3s ease-in-out infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 4px var(--text-primary); }
+  50% { box-shadow: 0 0 10px var(--text-primary), 0 0 20px rgba(0, 255, 65, 0.2); }
+}
+
+/* Enhanced message entrance */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-10px) translateY(3px); filter: blur(1px); }
+  to { opacity: 1; transform: translateX(0) translateY(0); filter: blur(0); }
+}
+
+/* Right panel slide transition */
+.right-panel {
+  animation: panel-slide 0.15s ease-out;
+}
+
+@keyframes panel-slide {
+  from { opacity: 0; transform: translateX(10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Proposal status badge glows */
+.status-badge.pending {
+  box-shadow: 0 0 8px rgba(255, 255, 0, 0.3);
+}
+
+.status-badge.accepted {
+  box-shadow: 0 0 8px rgba(0, 191, 255, 0.3);
+}
+
+.status-badge.completed {
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+}
+
+.status-badge.disputed {
+  box-shadow: 0 0 8px rgba(255, 68, 68, 0.3);
+}
+
+/* Input cursor blink */
+.input-bar input::placeholder {
+  animation: blink-cursor 1s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  50% { opacity: 0; }
+}
+
+/* Sidebar quick-action button hover glow */
+.quick-actions button:hover {
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+}
+
+/* Unread badge */
+.unread-badge {
+  background: var(--accent-red);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 8px;
+  margin-left: auto;
+  min-width: 16px;
+  text-align: center;
+  animation: badge-pop 0.3s ease-out;
+  box-shadow: 0 0 6px rgba(255, 68, 68, 0.5);
+}
+
+@keyframes badge-pop {
+  from { transform: scale(0); }
+  50% { transform: scale(1.2); }
+  to { transform: scale(1); }
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .sidebar { width: 180px; }
+  .right-panel { width: 240px; }
+}
+
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .right-panel { display: none; }
+  .message-feed { width: 100%; }
 }
