@@ -51,6 +51,7 @@ interface Skill {
   description?: string;
 }
 
+// Mirror of server/src/index.ts dispute types — keep in sync
 interface DisputeEvidenceItem {
   kind: string;
   label: string;
@@ -546,8 +547,10 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [state.selectedChannel]);
 
-  // Auto-clear stale typing indicators after 4 seconds
+  // Auto-clear stale typing indicators after 4 seconds (only runs when there are active typists)
+  const hasTypists = Object.keys(state.typingAgents).length > 0;
   useEffect(() => {
+    if (!hasTypists) return;
     const interval = setInterval(() => {
       const now = Date.now();
       Object.entries(state.typingAgents).forEach(([key, ts]) => {
@@ -557,7 +560,7 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [state.typingAgents, dispatch]);
+  }, [hasTypists, state.typingAgents, dispatch]);
 
   // Get typing agents for current channel
   const typingInChannel = Object.entries(state.typingAgents)

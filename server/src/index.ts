@@ -87,6 +87,7 @@ interface ProposalState {
   updatedAt: number;
 }
 
+// Mirror of web/src/App.tsx dispute types — keep in sync
 interface DisputeEvidenceItem {
   kind: string;
   label: string;
@@ -571,13 +572,8 @@ function handleAgentChatMessage(msg: AgentChatMsg): void {
           slot.status = msg.arbiter_status;
           if (msg.arbiter_status === 'accepted') slot.accepted_at = Date.now();
         }
-        // Check if all arbiters responded — transition to evidence phase
-        const allResponded = d.arbiters.every(a => a.status === 'accepted' || a.status === 'declined' || a.status === 'replaced');
-        const allAccepted = d.arbiters.filter(a => a.status === 'accepted').length >= 3;
-        if (allResponded && allAccepted) {
-          d.phase = 'evidence';
-          d.evidence_deadline = msg.evidence_deadline;
-        }
+        // Phase transitions (to evidence, fallback) are handled by dedicated
+        // server messages (EVIDENCE_RECEIVED, DISPUTE_FALLBACK) — no guessing here
         d.updated_at = Date.now();
         broadcastToDashboards({ type: 'dispute_update', data: d });
       }
