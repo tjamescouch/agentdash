@@ -8,6 +8,14 @@ import tweetnaclUtil from 'tweetnacl-util';
 
 const { encodeBase64, decodeBase64 } = tweetnaclUtil;
 
+// Convert raw Ed25519 public key (32 bytes) to SPKI PEM format
+const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
+function rawPubkeyToPem(rawKey: Uint8Array): string {
+  const spki = Buffer.concat([ED25519_SPKI_PREFIX, Buffer.from(rawKey)]);
+  const b64 = spki.toString('base64');
+  return `-----BEGIN PUBLIC KEY-----\n${b64}\n-----END PUBLIC KEY-----\n`;
+}
+
 const PUBLIC_AGENTCHAT_URL = 'wss://agentchat-server.fly.dev';
 const LOCAL_AGENTCHAT_URL = 'ws://localhost:6667';
 const AGENTCHAT_PUBLIC = process.env.AGENTCHAT_PUBLIC === 'true';
@@ -144,6 +152,7 @@ interface DashboardClient {
   agentChatWs: WebSocket | null;
   agentId: string | null;
   nick: string | null;
+  agentChatPingInterval: ReturnType<typeof setInterval> | null;
 }
 
 interface AgentChatMsg {
@@ -180,6 +189,9 @@ interface AgentChatMsg {
   disputant?: string;
   respondent?: string;
   server_nonce?: string;
+  nonce?: string;
+  challenge_id?: string;
+  expires_at?: number;
   arbiters?: ArbiterSlot[];
   arbiter?: string;
   arbiter_status?: string;
@@ -232,10 +244,12 @@ function getAgentName(id: string, serverName?: string): string {
 function loadOrCreateIdentity(): Identity {
   if (existsSync(IDENTITY_FILE)) {
     const data: IdentityFile = JSON.parse(readFileSync(IDENTITY_FILE, 'utf-8'));
+    const publicKey = decodeBase64(data.publicKey);
     return {
-      publicKey: decodeBase64(data.publicKey),
+      publicKey,
       secretKey: decodeBase64(data.privateKey),
-      nick: data.nick
+      nick: data.nick,
+      pubkey: rawPubkeyToPem(publicKey)
     };
   }
 
@@ -250,7 +264,7 @@ function loadOrCreateIdentity(): Identity {
   }, null, 2));
 
   console.log(`Created new identity: ${nick}`);
-  return { ...keypair, nick };
+  return { ...keypair, nick, pubkey: rawPubkeyToPem(keypair.publicKey) };
 }
 
 function generateEphemeralIdentity(): Identity {
@@ -261,7 +275,7 @@ function generateEphemeralIdentity(): Identity {
     publicKey: keypair.publicKey,
     secretKey: keypair.secretKey,
     nick,
-    pubkey: encodeBase64(keypair.publicKey)
+    pubkey: rawPubkeyToPem(keypair.publicKey)
   };
 }
 
@@ -377,6 +391,26 @@ function handleAgentChatMessage(msg: AgentChatMsg): void {
   console.log('AgentChat:', msg.type, JSON.stringify(msg).slice(0, 150));
 
   switch (msg.type) {
+    case 'CHALLENGE': {
+      // Ed25519 challenge-response auth for main dashboard connection
+      const nonce = msg.nonce || '';
+      const challengeId = msg.challenge_id || '';
+      if (identity && nonce && challengeId) {
+        const timestamp = Date.now();
+        const signingContent = `AGENTCHAT_AUTH|${nonce}|${challengeId}|${timestamp}`;
+        const contentBytes = new TextEncoder().encode(signingContent);
+        const signature = nacl.sign.detached(contentBytes, identity.secretKey);
+        send({
+          type: 'VERIFY_IDENTITY',
+          challenge_id: challengeId,
+          timestamp,
+          signature: encodeBase64(signature)
+        });
+        console.log('Responded to CHALLENGE with VERIFY_IDENTITY');
+      }
+      break;
+    }
+
     case 'WELCOME':
       state.dashboardAgent!.id = msg.agent_id || null;
       state.dashboardAgent!.nick = msg.name || identity!.nick;
@@ -745,6 +779,14 @@ function connectClientToAgentChat(client: DashboardClient): void {
       name: ephemeral.nick,
       pubkey: ephemeral.pubkey
     }));
+
+    // Keepalive pings every 25s to prevent idle timeout
+    if (client.agentChatPingInterval) clearInterval(client.agentChatPingInterval);
+    client.agentChatPingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'PING' }));
+      }
+    }, 25000);
   });
 
   ws.on('message', (data) => {
@@ -758,19 +800,25 @@ function connectClientToAgentChat(client: DashboardClient): void {
 
   ws.on('close', () => {
     console.log(`Per-session connection closed for ${client.id}`);
-    // If the per-session connection drops, fall back to lurk mode
-    if (client.agentChatWs === ws) {
+    if (client.agentChatPingInterval) {
+      clearInterval(client.agentChatPingInterval);
+      client.agentChatPingInterval = null;
+    }
+    // Auto-reconnect if the dashboard client is still connected and was in participate mode
+    if (client.agentChatWs === ws && client.ws.readyState === WebSocket.OPEN) {
       client.agentChatWs = null;
       client.agentId = null;
-      client.identity = null;
-      client.nick = null;
-      client.mode = 'lurk';
-      if (client.ws.readyState === WebSocket.OPEN) {
-        client.ws.send(JSON.stringify({
-          type: 'mode_changed',
-          data: { mode: 'lurk', reason: 'session_connection_lost' }
-        }));
-      }
+      console.log(`Auto-reconnecting per-session connection for ${client.id}...`);
+      client.ws.send(JSON.stringify({
+        type: 'error',
+        data: { code: 'SESSION_RECONNECTING', message: 'AgentChat connection lost, reconnecting...' }
+      }));
+      // Reconnect after a short delay, reusing the same identity
+      setTimeout(() => {
+        if (client.ws.readyState === WebSocket.OPEN && client.mode === 'participate') {
+          reconnectClientToAgentChat(client);
+        }
+      }, 2000);
     }
   });
 
@@ -801,14 +849,19 @@ function handlePerSessionMessage(client: DashboardClient, msg: AgentChatMsg): vo
       break;
 
     case 'CHALLENGE': {
-      // Ed25519 challenge-response auth
-      const challenge = msg.server_nonce || msg.message || '';
-      if (client.identity && challenge) {
-        const challengeBytes = new TextEncoder().encode(challenge);
-        const signature = nacl.sign.detached(challengeBytes, client.identity.secretKey);
+      // Ed25519 challenge-response auth for per-session visitor connection
+      const nonce = msg.nonce || '';
+      const challengeId = msg.challenge_id || '';
+      if (client.identity && nonce && challengeId) {
+        const timestamp = Date.now();
+        const signingContent = `AGENTCHAT_AUTH|${nonce}|${challengeId}|${timestamp}`;
+        const contentBytes = new TextEncoder().encode(signingContent);
+        const signature = nacl.sign.detached(contentBytes, client.identity.secretKey);
         client.agentChatWs?.send(JSON.stringify({
-          type: 'CHALLENGE_RESPONSE',
-          sig: encodeBase64(signature)
+          type: 'VERIFY_IDENTITY',
+          challenge_id: challengeId,
+          timestamp,
+          signature: encodeBase64(signature)
         }));
       }
       break;
@@ -840,7 +893,75 @@ function handlePerSessionMessage(client: DashboardClient, msg: AgentChatMsg): vo
   }
 }
 
+function reconnectClientToAgentChat(client: DashboardClient): void {
+  if (!client.identity) {
+    // No identity to reconnect with — fall back to full connect
+    connectClientToAgentChat(client);
+    return;
+  }
+
+  console.log(`Reconnecting per-session AgentChat for ${client.id} as ${client.identity.nick}`);
+
+  const ws = new WebSocket(AGENTCHAT_URL);
+  client.agentChatWs = ws;
+
+  ws.on('open', () => {
+    console.log(`Per-session reconnection open for ${client.id}`);
+    ws.send(JSON.stringify({
+      type: 'IDENTIFY',
+      name: client.identity!.nick,
+      pubkey: client.identity!.pubkey
+    }));
+
+    if (client.agentChatPingInterval) clearInterval(client.agentChatPingInterval);
+    client.agentChatPingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'PING' }));
+      }
+    }, 25000);
+  });
+
+  ws.on('message', (data) => {
+    try {
+      const msg: AgentChatMsg = JSON.parse(data.toString());
+      handlePerSessionMessage(client, msg);
+    } catch (e) {
+      console.error(`Per-session message parse error for ${client.id}:`, e);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log(`Per-session reconnection closed for ${client.id}`);
+    if (client.agentChatPingInterval) {
+      clearInterval(client.agentChatPingInterval);
+      client.agentChatPingInterval = null;
+    }
+    if (client.agentChatWs === ws && client.ws.readyState === WebSocket.OPEN) {
+      client.agentChatWs = null;
+      client.agentId = null;
+      console.log(`Auto-reconnecting per-session connection for ${client.id}...`);
+      client.ws.send(JSON.stringify({
+        type: 'error',
+        data: { code: 'SESSION_RECONNECTING', message: 'AgentChat connection lost, reconnecting...' }
+      }));
+      setTimeout(() => {
+        if (client.ws.readyState === WebSocket.OPEN && client.mode === 'participate') {
+          reconnectClientToAgentChat(client);
+        }
+      }, 2000);
+    }
+  });
+
+  ws.on('error', (err) => {
+    console.error(`Per-session reconnection error for ${client.id}:`, err.message);
+  });
+}
+
 function disconnectClientFromAgentChat(client: DashboardClient): void {
+  if (client.agentChatPingInterval) {
+    clearInterval(client.agentChatPingInterval);
+    client.agentChatPingInterval = null;
+  }
   if (client.agentChatWs) {
     console.log(`Closing per-session AgentChat connection for ${client.id}`);
     try {
@@ -1088,7 +1209,8 @@ wss.on('connection', (ws, req) => {
     identity: null,
     agentChatWs: null,
     agentId: null,
-    nick: null
+    nick: null,
+    agentChatPingInterval: null
   };
   dashboardClients.add(client);
   console.log(`Dashboard client connected: ${client.id} from ${ip}`);
