@@ -1,5 +1,5 @@
 {
-  "name": "agentchat-dashboard-server",
+  "name": "agentctl-server",
   "version": "1.0.0",
   "type": "module",
   "scripts": {

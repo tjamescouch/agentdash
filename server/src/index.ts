@@ -87,6 +87,51 @@ interface ProposalState {
   updatedAt: number;
 }
 
+// Mirror of web/src/App.tsx dispute types — keep in sync
+interface DisputeEvidenceItem {
+  kind: string;
+  label: string;
+  value: string;
+  url?: string;
+  hash?: string;
+}
+
+interface DisputeEvidence {
+  items: DisputeEvidenceItem[];
+  statement: string;
+  submitted_at: number;
+}
+
+interface ArbiterSlot {
+  agent_id: string;
+  status: string;
+  accepted_at?: number;
+  vote?: {
+    verdict: string;
+    reasoning: string;
+    voted_at: number;
+  };
+}
+
+interface DisputeState {
+  id: string;
+  proposal_id: string;
+  disputant: string;
+  respondent: string;
+  reason: string;
+  phase: string;
+  arbiters: ArbiterSlot[];
+  disputant_evidence?: DisputeEvidence;
+  respondent_evidence?: DisputeEvidence;
+  verdict?: string;
+  rating_changes?: Record<string, { old: number; new: number; delta: number }>;
+  created_at: number;
+  evidence_deadline?: number;
+  vote_deadline?: number;
+  resolved_at?: number;
+  updated_at: number;
+}
+
 interface DashboardClient {
   ws: WebSocket;
   ip: string;
@@ -95,6 +140,10 @@ interface DashboardClient {
   subscriptions: Set<string>;
   lastPing: number;
   messageTimestamps: number[];
+  identity: Identity | null;
+  agentChatWs: WebSocket | null;
+  agentId: string | null;
+  nick: string | null;
 }
 
 interface AgentChatMsg {
@@ -110,8 +159,10 @@ interface AgentChatMsg {
   list?: Array<{ name: string; agents?: number; id: string; presence?: string; verified?: boolean }>;
   channels?: Array<{ name: string; agents?: number }>;
   agents?: Array<{ id: string; name: string; presence?: string; verified?: boolean }>;
+
   agent?: string;
   agentId?: string;
+  from_name?: string;
   proposal_id?: string;
   task?: string;
   amount?: number;
@@ -123,6 +174,26 @@ interface AgentChatMsg {
   message?: string;
   sig?: string;
   verified?: boolean;
+  // Dispute fields
+  dispute_id?: string;
+  reason?: string;
+  phase?: string;
+  disputant?: string;
+  respondent?: string;
+  server_nonce?: string;
+  arbiters?: ArbiterSlot[];
+  arbiter?: string;
+  arbiter_status?: string;
+  party?: string;
+  evidence_count?: number;
+  statement?: string;
+  items?: DisputeEvidenceItem[];
+  verdict?: string;
+  votes?: Array<{ arbiter: string; verdict: string; reasoning: string; voted_at: number }>;
+  rating_changes?: Record<string, { old: number; new: number; delta: number }>;
+  evidence_deadline?: number;
+  vote_deadline?: number;
+  resolved_at?: number;
 }
 
 interface Skill {
@@ -183,6 +254,18 @@ function loadOrCreateIdentity(): Identity {
   return { ...keypair, nick };
 }
 
+function generateEphemeralIdentity(): Identity {
+  const keypair = nacl.sign.keyPair();
+  const fingerprint = encodeBase64(keypair.publicKey).slice(0, 8);
+  const nick = `visitor-${fingerprint.slice(0, 4).toLowerCase()}`;
+  return {
+    publicKey: keypair.publicKey,
+    secretKey: keypair.secretKey,
+    nick,
+    pubkey: encodeBase64(keypair.publicKey)
+  };
+}
+
 // ============ State Store ============
 
 const state = {
@@ -190,6 +273,7 @@ const state = {
   channels: new Map<string, ChannelState>(),
   leaderboard: [] as Array<{ id: string; nick?: string; elo: number }>,
   proposals: new Map<string, ProposalState>(),
+  disputes: new Map<string, DisputeState>(),
   skills: [] as Skill[],
   connected: false,
   dashboardAgent: null as { id: string | null; nick: string } | null
@@ -462,6 +546,132 @@ function handleAgentChatMessage(msg: AgentChatMsg): void {
       console.error('AgentChat error:', msg.code, msg.message);
       break;
 
+    // Agentcourt dispute messages
+    case 'DISPUTE_INTENT_ACK': {
+      const dispute: DisputeState = {
+        id: msg.dispute_id!,
+        proposal_id: msg.proposal_id!,
+        disputant: msg.disputant || msg.from || '',
+        respondent: msg.respondent || '',
+        reason: msg.reason || '',
+        phase: 'reveal_pending',
+        arbiters: [],
+        created_at: msg.ts || Date.now(),
+        updated_at: Date.now()
+      };
+      state.disputes.set(dispute.id, dispute);
+      broadcastToDashboards({ type: 'dispute_update', data: dispute });
+      break;
+    }
+
+    case 'DISPUTE_REVEALED': {
+      const d = msg.dispute_id && state.disputes.get(msg.dispute_id);
+      if (d) {
+        d.phase = 'panel_selection';
+        d.updated_at = Date.now();
+        broadcastToDashboards({ type: 'dispute_update', data: d });
+      }
+      break;
+    }
+
+    case 'PANEL_FORMED': {
+      const d = msg.dispute_id && state.disputes.get(msg.dispute_id);
+      if (d) {
+        d.phase = 'arbiter_response';
+        d.arbiters = (msg.arbiters || []).map(a => ({ ...a }));
+        d.updated_at = Date.now();
+        broadcastToDashboards({ type: 'dispute_update', data: d });
+      }
+      break;
+    }
+
+    case 'ARBITER_ASSIGNED': {
+      // Individual arbiter notification — update slot status if we have the dispute
+      const d = msg.dispute_id && state.disputes.get(msg.dispute_id);
+      if (d && msg.arbiter) {
+        const slot = d.arbiters.find(a => a.agent_id === msg.arbiter);
+        if (slot && msg.arbiter_status) {
+          slot.status = msg.arbiter_status;
+          if (msg.arbiter_status === 'accepted') slot.accepted_at = Date.now();
+        }
+        // Phase transitions (to evidence, fallback) are handled by dedicated
+        // server messages (EVIDENCE_RECEIVED, DISPUTE_FALLBACK) — no guessing here
+        d.updated_at = Date.now();
+        broadcastToDashboards({ type: 'dispute_update', data: d });
+      }
+      break;
+    }
+
+    case 'EVIDENCE_RECEIVED': {
+      const d = msg.dispute_id && state.disputes.get(msg.dispute_id);
+      if (d) {
+        d.phase = 'evidence';
+        const evidence: DisputeEvidence = {
+          items: msg.items || [],
+          statement: msg.statement || '',
+          submitted_at: Date.now()
+        };
+        if (msg.party === d.disputant) {
+          d.disputant_evidence = evidence;
+        } else if (msg.party === d.respondent) {
+          d.respondent_evidence = evidence;
+        }
+        d.updated_at = Date.now();
+        broadcastToDashboards({ type: 'dispute_update', data: d });
+      }
+      break;
+    }
+
+    case 'CASE_READY': {
+      const d = msg.dispute_id && state.disputes.get(msg.dispute_id);
+      if (d) {
+        d.phase = 'deliberation';
+        d.vote_deadline = msg.vote_deadline;
+        d.updated_at = Date.now();
+        broadcastToDashboards({ type: 'dispute_update', data: d });
+      }
+      break;
+    }
+
+    case 'VERDICT': {
+      const d = msg.dispute_id && state.disputes.get(msg.dispute_id);
+      if (d) {
+        d.phase = 'resolved';
+        d.verdict = msg.verdict;
+        d.rating_changes = msg.rating_changes;
+        d.resolved_at = msg.resolved_at || Date.now();
+        if (msg.votes) {
+          msg.votes.forEach(v => {
+            const slot = d.arbiters.find(a => a.agent_id === v.arbiter);
+            if (slot) {
+              slot.status = 'voted';
+              slot.vote = { verdict: v.verdict, reasoning: v.reasoning, voted_at: v.voted_at };
+            }
+          });
+        }
+        d.updated_at = Date.now();
+        broadcastToDashboards({ type: 'dispute_update', data: d });
+      }
+      break;
+    }
+
+    case 'DISPUTE_FALLBACK': {
+      const d = msg.dispute_id && state.disputes.get(msg.dispute_id);
+      if (d) {
+        d.phase = 'fallback';
+        d.updated_at = Date.now();
+        broadcastToDashboards({ type: 'dispute_update', data: d });
+      }
+      break;
+    }
+
+    case 'TYPING':
+      broadcastToDashboards({
+        type: 'typing',
+        data: { from: msg.from, from_name: msg.from_name, channel: msg.channel }
+      });
+      break;
+
     case 'PONG':
       break;
   }
@@ -507,6 +717,145 @@ function handleIncomingMessage(msg: AgentChatMsg): void {
   broadcastToDashboards({ type: 'message', data: message });
 }
 
+// ============ Per-Session AgentChat Connections ============
+
+function signMessageWithIdentity(content: string, id: Identity): string {
+  const messageBytes = new TextEncoder().encode(content);
+  const signature = nacl.sign.detached(messageBytes, id.secretKey);
+  return encodeBase64(signature);
+}
+
+function connectClientToAgentChat(client: DashboardClient): void {
+  if (client.agentChatWs) {
+    disconnectClientFromAgentChat(client);
+  }
+
+  const ephemeral = generateEphemeralIdentity();
+  client.identity = ephemeral;
+  client.nick = ephemeral.nick;
+
+  console.log(`Creating per-session AgentChat connection for ${client.id} as ${ephemeral.nick}`);
+
+  const ws = new WebSocket(AGENTCHAT_URL);
+  client.agentChatWs = ws;
+
+  ws.on('open', () => {
+    console.log(`Per-session connection open for ${client.id}`);
+    ws.send(JSON.stringify({
+      type: 'IDENTIFY',
+      name: ephemeral.nick,
+      pubkey: ephemeral.pubkey
+    }));
+  });
+
+  ws.on('message', (data) => {
+    try {
+      const msg: AgentChatMsg = JSON.parse(data.toString());
+      handlePerSessionMessage(client, msg);
+    } catch (e) {
+      console.error(`Per-session message parse error for ${client.id}:`, e);
+    }
+  });
+
+  ws.on('close', () => {
+    console.log(`Per-session connection closed for ${client.id}`);
+    // If the per-session connection drops, fall back to lurk mode
+    if (client.agentChatWs === ws) {
+      client.agentChatWs = null;
+      client.agentId = null;
+      client.identity = null;
+      client.nick = null;
+      client.mode = 'lurk';
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify({
+          type: 'mode_changed',
+          data: { mode: 'lurk', reason: 'session_connection_lost' }
+        }));
+      }
+    }
+  });
+
+  ws.on('error', (err) => {
+    console.error(`Per-session connection error for ${client.id}:`, err.message);
+  });
+}
+
+function handlePerSessionMessage(client: DashboardClient, msg: AgentChatMsg): void {
+  switch (msg.type) {
+    case 'WELCOME':
+      client.agentId = msg.agent_id || null;
+      console.log(`Per-session ${client.id} registered as ${msg.agent_id}`);
+      // Notify the browser of their session identity
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify({
+          type: 'session_identity',
+          data: { agentId: client.agentId, nick: client.nick }
+        }));
+      }
+      // Join channels the observer is already in
+      for (const channelName of state.channels.keys()) {
+        client.agentChatWs?.send(JSON.stringify({
+          type: 'JOIN',
+          channel: channelName
+        }));
+      }
+      break;
+
+    case 'CHALLENGE': {
+      // Ed25519 challenge-response auth
+      const challenge = msg.server_nonce || msg.message || '';
+      if (client.identity && challenge) {
+        const challengeBytes = new TextEncoder().encode(challenge);
+        const signature = nacl.sign.detached(challengeBytes, client.identity.secretKey);
+        client.agentChatWs?.send(JSON.stringify({
+          type: 'CHALLENGE_RESPONSE',
+          sig: encodeBase64(signature)
+        }));
+      }
+      break;
+    }
+
+    case 'JOINED':
+      // Per-session joined a channel — no extra state tracking needed
+      break;
+
+    case 'MSG':
+      // Feed into global state so all dashboard clients see it via broadcast
+      if (msg.to) {
+        handleIncomingMessage(msg);
+      }
+      break;
+
+    case 'ERROR':
+      console.error(`Per-session error for ${client.id}:`, msg.code, msg.message);
+      if (client.ws.readyState === WebSocket.OPEN) {
+        client.ws.send(JSON.stringify({
+          type: 'error',
+          data: { code: msg.code || 'AGENTCHAT_ERROR', message: msg.message || 'AgentChat error' }
+        }));
+      }
+      break;
+
+    case 'PONG':
+      break;
+  }
+}
+
+function disconnectClientFromAgentChat(client: DashboardClient): void {
+  if (client.agentChatWs) {
+    console.log(`Closing per-session AgentChat connection for ${client.id}`);
+    try {
+      client.agentChatWs.close();
+    } catch {
+      // Ignore close errors
+    }
+    client.agentChatWs = null;
+  }
+  client.identity = null;
+  client.agentId = null;
+  client.nick = null;
+}
+
 // ============ Dashboard Bridge ============
 
 const dashboardClients = new Set<DashboardClient>();
@@ -543,6 +892,7 @@ function getStateSnapshot(): Record<string, unknown> {
     ),
     leaderboard: state.leaderboard,
     proposals: [...state.proposals.values()],
+    disputes: [...state.disputes.values()],
     skills: state.skills,
     dashboardAgent: state.dashboardAgent
   };
@@ -563,8 +913,8 @@ function handleDashboardMessage(client: DashboardClient, msg: DashboardMessage):
         client.ws.send(JSON.stringify({ type: 'error', data: { code: 'LURK_MODE', message: 'Cannot send in lurk mode' } }));
         return;
       }
-      if (!agentChatWs || agentChatWs.readyState !== WebSocket.OPEN) {
-        client.ws.send(JSON.stringify({ type: 'error', data: { code: 'NOT_CONNECTED', message: 'Not connected to AgentChat server' } }));
+      if (!client.agentChatWs || client.agentChatWs.readyState !== WebSocket.OPEN) {
+        client.ws.send(JSON.stringify({ type: 'error', data: { code: 'NO_SESSION', message: 'No per-session AgentChat connection. Switch to participate mode first.' } }));
         return;
       }
       {
@@ -573,16 +923,23 @@ function handleDashboardMessage(client: DashboardClient, msg: DashboardMessage):
           client.ws.send(JSON.stringify({ type: 'error', data: { code: 'INVALID_MESSAGE', message: 'Message empty or too long (max 4000)' } }));
           return;
         }
-        const sig = signMessage(content);
-        send({ type: 'MSG', to: msg.data.to, content, sig });
+        const sig = client.identity ? signMessageWithIdentity(content, client.identity) : null;
+        client.agentChatWs.send(JSON.stringify({ type: 'MSG', to: msg.data.to, content, sig }));
         client.ws.send(JSON.stringify({ type: 'message_sent', data: { success: true } }));
       }
       break;
 
-    case 'set_mode':
-      client.mode = (msg.data as { mode: string }).mode;
+    case 'set_mode': {
+      const newMode = (msg.data as { mode: string }).mode;
+      if (newMode === 'participate' && client.mode !== 'participate') {
+        connectClientToAgentChat(client);
+      } else if (newMode === 'lurk' && client.mode !== 'lurk') {
+        disconnectClientFromAgentChat(client);
+      }
+      client.mode = newMode;
       client.ws.send(JSON.stringify({ type: 'mode_changed', data: { mode: client.mode } }));
       break;
+    }
 
     case 'subscribe':
       client.subscriptions = new Set((msg.data as { channels: string[] }).channels);
@@ -593,7 +950,12 @@ function handleDashboardMessage(client: DashboardClient, msg: DashboardMessage):
         client.ws.send(JSON.stringify({ type: 'error', data: { code: 'LURK_MODE', message: 'Cannot join in lurk mode' } }));
         return;
       }
-      send({ type: 'JOIN', channel: (msg.data as { channel: string }).channel });
+      if (client.agentChatWs && client.agentChatWs.readyState === WebSocket.OPEN) {
+        client.agentChatWs.send(JSON.stringify({ type: 'JOIN', channel: (msg.data as { channel: string }).channel }));
+      } else {
+        // Fall back to global observer for channel joining
+        send({ type: 'JOIN', channel: (msg.data as { channel: string }).channel });
+      }
       break;
 
     case 'refresh_channels':
@@ -723,7 +1085,11 @@ wss.on('connection', (ws, req) => {
     mode: 'lurk',
     subscriptions: new Set(),
     lastPing: Date.now(),
-    messageTimestamps: []
+    messageTimestamps: [],
+    identity: null,
+    agentChatWs: null,
+    agentId: null,
+    nick: null
   };
   dashboardClients.add(client);
   console.log(`Dashboard client connected: ${client.id} from ${ip}`);
@@ -752,6 +1118,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    disconnectClientFromAgentChat(client);
     dashboardClients.delete(client);
     const count = ipConnectionCounts.get(client.ip) || 1;
     if (count <= 1) {
