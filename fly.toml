@@ -4,7 +4,7 @@ primary_region = 'sjc'
 [build]
 
 [env]
-  AGENTCHAT_PUBLIC = 'true'
+  # AGENTCHAT_PUBLIC no longer needed — container auto-detected
 
 [http_service]
   internal_port = 3000

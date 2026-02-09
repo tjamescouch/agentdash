@@ -48,18 +48,39 @@ const PUBLIC_AGENTCHAT_URL = 'wss://agentchat-server.fly.dev';
 const LOCAL_AGENTCHAT_URL = 'ws://localhost:6667';
 const AGENTCHAT_PUBLIC = process.env.AGENTCHAT_PUBLIC === 'true';
 
+function isRunningInContainer(): boolean {
+  // Fly.io
+  if (process.env.FLY_APP_NAME) return true;
+  // Kubernetes
+  if (process.env.KUBERNETES_SERVICE_HOST) return true;
+  // Docker
+  try { readFileSync('/.dockerenv'); return true; } catch { /* not docker */ }
+  // Railway, Render, Heroku, etc.
+  if (process.env.RAILWAY_ENVIRONMENT || process.env.RENDER || process.env.DYNO) return true;
+  return false;
+}
+
 function resolveAgentChatUrl(): string {
   const explicit = process.env.AGENTCHAT_URL;
+  const inContainer = isRunningInContainer();
+
   if (explicit) {
     const parsed = new URL(explicit);
     const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1';
-    if (!isLocal && !AGENTCHAT_PUBLIC) {
-      console.error(`ERROR: AGENTCHAT_URL points to remote host "${parsed.hostname}" but AGENTCHAT_PUBLIC is not set.`);
-      console.error('Set AGENTCHAT_PUBLIC=true to allow connections to non-localhost servers.');
+    if (!isLocal && !inContainer && !AGENTCHAT_PUBLIC) {
+      console.error(`ERROR: AGENTCHAT_URL points to remote host "${parsed.hostname}" but running on bare metal.`);
+      console.error('Public networks are only allowed in containers. Set AGENTCHAT_PUBLIC=true to override.');
       process.exit(1);
     }
     return explicit;
   }
+
+  if (AGENTCHAT_PUBLIC && !inContainer) {
+    console.warn('WARNING: AGENTCHAT_PUBLIC=true on bare metal. Use a container for production or unset to use localhost.');
+  }
+
+  // In containers, default to public network; on bare metal, default to local
+  if (inContainer) return PUBLIC_AGENTCHAT_URL;
   return AGENTCHAT_PUBLIC ? PUBLIC_AGENTCHAT_URL : LOCAL_AGENTCHAT_URL;
 }
 
