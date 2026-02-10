@@ -1036,10 +1036,16 @@ function handleIncomingMessage(msg: AgentChatMsg): void {
     });
   }
 
+  // Cache from_name so future lookups (file transfers, typing) resolve correctly
+  const senderName = msg.from_name || msg.name;
+  if (msg.from && senderName && !agentNameOverrides[msg.from]) {
+    agentNameOverrides[msg.from] = senderName;
+  }
+
   const message: ChatMessage = {
     id: msgKey,
     from: msg.from!,
-    fromNick: getAgentName(msg.from!, msg.name),
+    fromNick: getAgentName(msg.from!, senderName),
     to: channel,
     content: msg.content!,
     ts: msg.ts || Date.now(),
