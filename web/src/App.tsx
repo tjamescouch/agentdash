@@ -182,7 +182,9 @@ type DashboardAction =
   | { type: 'CONNECTION_ERROR'; error: string }
   | { type: 'CONNECTING' }
   | { type: 'TOGGLE_KILLSWITCH' }
-  | { type: 'LOCKDOWN' };
+  | { type: 'LOCKDOWN' }
+  | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }
+  | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] };
 
 interface StateSyncPayload {
   agents: Agent[];
@@ -412,6 +414,10 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
       return { ...state, killSwitchOpen: !state.killSwitchOpen };
     case 'LOCKDOWN':
       return { ...state, lockdown: true, killSwitchOpen: false };
+    case 'AGENTS_BULK_UPDATE':
+      return { ...state, agents: Object.fromEntries(action.data.map(a => [a.id, a])) };
+    case 'CHANNELS_BULK_UPDATE':
+      return { ...state, channels: Object.fromEntries(action.data.map(c => [c.name, c])) };
     default:
       return state;
   }
@@ -485,6 +491,12 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
             break;
           case 'agent_update':
             dispatch({ type: 'AGENT_UPDATE', data: msg.data });
+            break;
+          case 'agents_update':
+            dispatch({ type: 'AGENTS_BULK_UPDATE', data: msg.data });
+            break;
+          case 'channel_update':
+            dispatch({ type: 'CHANNELS_BULK_UPDATE', data: msg.data });
             break;
           case 'proposal_update':
             dispatch({ type: 'PROPOSAL_UPDATE', data: msg.data });
