@@ -711,7 +711,7 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
   return (
     <div className="topbar">
       <div className="topbar-left">
-        <span className="logo">AgentChat Dashboard</span>
+        <span className="logo">AgentChat</span>
         <span className={`status ${state.connected ? 'online' : 'offline'}`}>
           {state.connected ? 'CONNECTED' : 'DISCONNECTED'}
         </span>
