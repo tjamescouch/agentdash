@@ -184,7 +184,9 @@ type DashboardAction =
   | { type: 'TOGGLE_KILLSWITCH' }
   | { type: 'LOCKDOWN' }
   | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }
-  | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] };
+  | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] }
+  | { type: 'SET_DASHBOARD_AGENT'; data: { agentId: string; nick: string; publicKey?: string; secretKey?: string } }
+  | { type: 'NICK_CHANGED'; nick: string };
 
 interface StateSyncPayload {
   agents: Agent[];
@@ -212,6 +214,7 @@ const DashboardContext = createContext<DashboardContextValue | null>(null);
 // ============ Persistence ============
 
 const savedMode = typeof window !== 'undefined' ? localStorage.getItem('dashboardMode') || 'lurk' : 'lurk';
+const savedNick = typeof window !== 'undefined' ? localStorage.getItem('dashboardNick') : null;
 
 const loadPersistedMessages = (): Record<string, Message[]> => {
   try {
@@ -418,6 +421,28 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
       return { ...state, agents: Object.fromEntries(action.data.map(a => [a.id, a])) };
     case 'CHANNELS_BULK_UPDATE':
       return { ...state, channels: Object.fromEntries(action.data.map(c => [c.name, c])) };
+    case 'SET_DASHBOARD_AGENT': {
+      const agent = { id: action.data.agentId, nick: action.data.nick };
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('dashboardNick', agent.nick);
+        if (action.data.publicKey && action.data.secretKey) {
+          localStorage.setItem('dashboardIdentity', JSON.stringify({
+            publicKey: action.data.publicKey,
+            secretKey: action.data.secretKey
+          }));
+        }
+      }
+      return { ...state, dashboardAgent: agent };
+    }
+    case 'NICK_CHANGED': {
+      if (typeof window !== 'undefined') localStorage.setItem('dashboardNick', action.nick);
+      return {
+        ...state,
+        dashboardAgent: state.dashboardAgent
+          ? { ...state.dashboardAgent, nick: action.nick }
+          : { id: null, nick: action.nick }
+      };
+    }
     default:
       return state;
   }
@@ -466,7 +491,16 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
         reconnectDelay = 2000; // reset on success
         const savedMode = localStorage.getItem('dashboardMode');
         if (savedMode && savedMode !== 'lurk') {
-          ws.current!.send(JSON.stringify({ type: 'set_mode', data: { mode: savedMode } }));
+          const storedNick = localStorage.getItem('dashboardNick');
+          const storedIdentity = localStorage.getItem('dashboardIdentity');
+          ws.current!.send(JSON.stringify({
+            type: 'set_mode',
+            data: {
+              mode: savedMode,
+              nick: storedNick || undefined,
+              identity: storedIdentity ? JSON.parse(storedIdentity) : undefined
+            }
+          }));
         }
       };
 
@@ -515,6 +549,12 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
             break;
           case 'mode_changed':
             dispatch({ type: 'SET_MODE', mode: msg.data.mode });
+            break;
+          case 'session_identity':
+            dispatch({ type: 'SET_DASHBOARD_AGENT', data: msg.data });
+            break;
+          case 'nick_changed':
+            dispatch({ type: 'NICK_CHANGED', nick: msg.data.nick });
             break;
           case 'file_offer':
             dispatch({
@@ -700,7 +740,17 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
         </button>
         <button
           className={`mode-btn ${state.mode}`}
-          onClick={() => send({ type: 'set_mode', data: { mode: state.mode === 'lurk' ? 'participate' : 'lurk' } })}
+          onClick={() => {
+            const newMode = state.mode === 'lurk' ? 'participate' : 'lurk';
+            const storedIdentity = typeof window !== 'undefined' ? localStorage.getItem('dashboardIdentity') : null;
+            send({
+              type: 'set_mode',
+              data: {
+                mode: newMode,
+                ...(newMode === 'participate' && storedIdentity ? { identity: JSON.parse(storedIdentity) } : {})
+              }
+            });
+          }}
         >
           {state.mode === 'lurk' ? 'LURK' : 'PARTICIPATE'}
         </button>
@@ -846,6 +896,7 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
       const newNick = input.trim().slice(6).trim();
       if (newNick) {
         send({ type: 'set_nick', data: { nick: newNick } });
+        localStorage.setItem('dashboardNick', newNick);
       }
       setInput('');
       return;

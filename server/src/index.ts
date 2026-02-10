@@ -37,14 +37,6 @@ let broadcastLog: ((entry: LogEntry) => void) | null = null;
   console.warn = (...args: unknown[]) => capture('warn', origWarn, args);
 })();
 
-// Convert raw Ed25519 public key (32 bytes) to SPKI PEM format
-const ED25519_SPKI_PREFIX = Buffer.from('302a300506032b6570032100', 'hex');
-function rawPubkeyToPem(rawKey: Uint8Array): string {
-  const spki = Buffer.concat([ED25519_SPKI_PREFIX, Buffer.from(rawKey)]);
-  const b64 = spki.toString('base64');
-  return `-----BEGIN PUBLIC KEY-----\n${b64}\n-----END PUBLIC KEY-----\n`;
-}
-
 const PUBLIC_AGENTCHAT_URL = 'wss://agentchat-server.fly.dev';
 const LOCAL_AGENTCHAT_URL = 'ws://localhost:6667';
 const AGENTCHAT_PUBLIC = process.env.AGENTCHAT_PUBLIC === 'true';
@@ -87,7 +79,6 @@ function resolveAgentChatUrl(): string {
 
 const AGENTCHAT_URL = resolveAgentChatUrl();
 const PORT = Number(process.env.PORT) || 3000;
-const IDENTITY_FILE = process.env.IDENTITY_FILE || '.dashboard-identity.json';
 const AGENT_NAMES_FILE = 'agent-names.json';
 
 // ============ Types ============
@@ -95,13 +86,6 @@ const AGENT_NAMES_FILE = 'agent-names.json';
 interface Identity {
   publicKey: Uint8Array;
   secretKey: Uint8Array;
-  nick: string;
-  pubkey?: string;
-}
-
-interface IdentityFile {
-  publicKey: string;
-  privateKey: string;
   nick: string;
 }
 
@@ -563,41 +547,29 @@ function getAgentName(id: string, serverName?: string): string {
 
 // ============ Identity Management ============
 
-function loadOrCreateIdentity(): Identity {
-  if (existsSync(IDENTITY_FILE)) {
-    const data: IdentityFile = JSON.parse(readFileSync(IDENTITY_FILE, 'utf-8'));
-    const publicKey = decodeBase64(data.publicKey);
-    return {
-      publicKey,
-      secretKey: decodeBase64(data.privateKey),
-      nick: data.nick,
-      pubkey: rawPubkeyToPem(publicKey)
-    };
-  }
-
-  const keypair = nacl.sign.keyPair();
-  const fingerprint = encodeBase64(keypair.publicKey).slice(0, 8);
-  const nick = `dashboard-${fingerprint.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toLowerCase()}`;
-
-  writeFileSync(IDENTITY_FILE, JSON.stringify({
-    publicKey: encodeBase64(keypair.publicKey),
-    privateKey: encodeBase64(keypair.secretKey),
-    nick
-  }, null, 2));
-
-  console.log(`Created new identity: ${nick}`);
-  return { ...keypair, nick, pubkey: rawPubkeyToPem(keypair.publicKey) };
+function rawPublicKeyToPem(raw: Uint8Array): string {
+  // Ed25519 SPKI DER: 12-byte prefix + 32-byte raw public key
+  const prefix = Buffer.from('302a300506032b6570032100', 'hex');
+  const der = Buffer.concat([prefix, Buffer.from(raw)]);
+  return `-----BEGIN PUBLIC KEY-----\n${der.toString('base64')}\n-----END PUBLIC KEY-----`;
 }
 
-function generateEphemeralIdentity(): Identity {
+function rawSecretKeyToPem(raw: Uint8Array): string {
+  // tweetnacl secretKey is 64 bytes (32-byte seed + 32-byte public). PKCS8 DER needs the 32-byte seed.
+  const seed = raw.slice(0, 32);
+  const prefix = Buffer.from('302e020100300506032b657004220420', 'hex');
+  const der = Buffer.concat([prefix, Buffer.from(seed)]);
+  return `-----BEGIN PRIVATE KEY-----\n${der.toString('base64')}\n-----END PRIVATE KEY-----`;
+}
+
+function generateEphemeralIdentity(prefix = 'visitor'): Identity {
   const keypair = nacl.sign.keyPair();
   const fingerprint = encodeBase64(keypair.publicKey).slice(0, 8);
-  const nick = `visitor-${fingerprint.slice(0, 4).toLowerCase()}`;
+  const nick = `${prefix}-${fingerprint.slice(0, 4).toLowerCase()}`;
   return {
     publicKey: keypair.publicKey,
     secretKey: keypair.secretKey,
-    nick,
-    pubkey: rawPubkeyToPem(keypair.publicKey)
+    nick
   };
 }
 
@@ -661,7 +633,8 @@ function connectToAgentChat(id: Identity): void {
     state.dashboardAgent = { id: null, nick: id.nick };
     reconnectDelay = 1000;
 
-    send({ type: 'IDENTIFY', name: id.nick, pubkey: id.pubkey || null });
+    const pemPubkey = rawPublicKeyToPem(id.publicKey);
+    send({ type: 'IDENTIFY', name: id.nick, pubkey: pemPubkey });
     send({ type: 'LIST_CHANNELS' });
     // Join default channels; additional channels auto-joined on CHANNELS response
     setTimeout(() => send({ type: 'JOIN', channel: '#general' }), 500);
@@ -718,29 +691,27 @@ function handleAgentChatMessage(msg: AgentChatMsg): void {
 
   switch (msg.type) {
     case 'CHALLENGE': {
-      // Ed25519 challenge-response auth for main dashboard connection
-      const nonce = msg.nonce || '';
-      const challengeId = msg.challenge_id || '';
-      if (identity && nonce && challengeId) {
-        const timestamp = Date.now();
-        const signingContent = `AGENTCHAT_AUTH|${nonce}|${challengeId}|${timestamp}`;
-        const contentBytes = new TextEncoder().encode(signingContent);
-        const signature = nacl.sign.detached(contentBytes, identity.secretKey);
-        send({
-          type: 'VERIFY_IDENTITY',
-          challenge_id: challengeId,
-          timestamp,
-          signature: encodeBase64(signature)
-        });
-        console.log('Responded to CHALLENGE with VERIFY_IDENTITY');
-      }
+      if (!identity || !agentChatWs) break;
+      const { challenge_id, nonce } = msg as any;
+      const timestamp = Date.now();
+      const signingContent = `AGENTCHAT_AUTH|${nonce}|${challenge_id}|${timestamp}`;
+      const pemPrivkey = rawSecretKeyToPem(identity.secretKey);
+      const privateKey = crypto.createPrivateKey(pemPrivkey);
+      const signature = crypto.sign(null, Buffer.from(signingContent), privateKey);
+      send({
+        type: 'VERIFY_IDENTITY',
+        challenge_id,
+        signature: signature.toString('base64'),
+        timestamp
+      });
+      console.log(`Observer responding to CHALLENGE ${challenge_id}`);
       break;
     }
 
     case 'WELCOME':
       state.dashboardAgent!.id = msg.agent_id || null;
       state.dashboardAgent!.nick = msg.name || identity!.nick;
-      console.log(`Registered as ${msg.agent_id}`);
+      console.log(`Registered as ${msg.agent_id} (verified=${!!(msg as any).verified})`);
       break;
 
     case 'MSG':
@@ -1084,25 +1055,35 @@ function signMessageWithIdentity(content: string, id: Identity): string {
   return encodeBase64(signature);
 }
 
-function connectClientToAgentChat(client: DashboardClient): void {
+function connectClientToAgentChat(client: DashboardClient, preferredNick?: string, browserIdentity?: { publicKey: string; secretKey: string }): void {
   if (client.agentChatWs) {
     disconnectClientFromAgentChat(client);
   }
 
-  const ephemeral = generateEphemeralIdentity();
-  client.identity = ephemeral;
-  client.nick = ephemeral.nick;
+  let identity: Identity;
+  if (browserIdentity) {
+    const pk = decodeBase64(browserIdentity.publicKey);
+    const sk = decodeBase64(browserIdentity.secretKey);
+    identity = { publicKey: pk, secretKey: sk, nick: preferredNick || 'visitor' };
+  } else {
+    identity = generateEphemeralIdentity();
+    if (preferredNick) identity.nick = preferredNick;
+  }
+  client.identity = identity;
+  client.nick = identity.nick;
 
-  console.log(`Creating per-session AgentChat connection for ${client.id} as ${ephemeral.nick}`);
+  console.log(`Creating per-session AgentChat connection for ${client.id} as ${identity.nick} (persistent=${!!browserIdentity})`);
 
   const ws = new WebSocket(AGENTCHAT_URL);
   client.agentChatWs = ws;
 
   ws.on('open', () => {
     console.log(`Per-session connection open for ${client.id}`);
+    const pemPubkey = rawPublicKeyToPem(identity.publicKey);
     ws.send(JSON.stringify({
       type: 'IDENTIFY',
-      name: ephemeral.nick
+      name: identity.nick,
+      pubkey: pemPubkey
     }));
 
     // Keepalive pings every 25s to prevent idle timeout
@@ -1156,12 +1137,17 @@ function handlePerSessionMessage(client: DashboardClient, msg: AgentChatMsg): vo
   switch (msg.type) {
     case 'WELCOME':
       client.agentId = msg.agent_id || null;
-      console.log(`Per-session ${client.id} registered as ${msg.agent_id}`);
-      // Notify the browser of their session identity
+      console.log(`Per-session ${client.id} registered as ${msg.agent_id} (verified=${!!(msg as any).verified})`);
+      // Notify the browser of their session identity, including keys for localStorage persistence
       if (client.ws.readyState === WebSocket.OPEN) {
         client.ws.send(JSON.stringify({
           type: 'session_identity',
-          data: { agentId: client.agentId, nick: client.nick }
+          data: {
+            agentId: client.agentId,
+            nick: client.nick,
+            publicKey: client.identity ? encodeBase64(client.identity.publicKey) : undefined,
+            secretKey: client.identity ? encodeBase64(client.identity.secretKey) : undefined
+          }
         }));
       }
       // Join channels the observer is already in
@@ -1174,21 +1160,20 @@ function handlePerSessionMessage(client: DashboardClient, msg: AgentChatMsg): vo
       break;
 
     case 'CHALLENGE': {
-      // Ed25519 challenge-response auth for per-session visitor connection
-      const nonce = msg.nonce || '';
-      const challengeId = msg.challenge_id || '';
-      if (client.identity && nonce && challengeId) {
-        const timestamp = Date.now();
-        const signingContent = `AGENTCHAT_AUTH|${nonce}|${challengeId}|${timestamp}`;
-        const contentBytes = new TextEncoder().encode(signingContent);
-        const signature = nacl.sign.detached(contentBytes, client.identity.secretKey);
-        client.agentChatWs?.send(JSON.stringify({
-          type: 'VERIFY_IDENTITY',
-          challenge_id: challengeId,
-          timestamp,
-          signature: encodeBase64(signature)
-        }));
-      }
+      if (!client.identity || !client.agentChatWs) break;
+      const { challenge_id, nonce } = msg as any;
+      const timestamp = Date.now();
+      const signingContent = `AGENTCHAT_AUTH|${nonce}|${challenge_id}|${timestamp}`;
+      const pemPrivkey = rawSecretKeyToPem(client.identity.secretKey);
+      const privateKey = crypto.createPrivateKey(pemPrivkey);
+      const signature = crypto.sign(null, Buffer.from(signingContent), privateKey);
+      client.agentChatWs.send(JSON.stringify({
+        type: 'VERIFY_IDENTITY',
+        challenge_id,
+        signature: signature.toString('base64'),
+        timestamp
+      }));
+      console.log(`Per-session ${client.id} responding to CHALLENGE ${challenge_id}`);
       break;
     }
 
@@ -1434,9 +1419,11 @@ function reconnectClientToAgentChat(client: DashboardClient): void {
 
   ws.on('open', () => {
     console.log(`Per-session reconnection open for ${client.id}`);
+    const pemPubkey = rawPublicKeyToPem(client.identity!.publicKey);
     ws.send(JSON.stringify({
       type: 'IDENTIFY',
-      name: client.identity!.nick
+      name: client.identity!.nick,
+      pubkey: pemPubkey
     }));
 
     if (client.agentChatPingInterval) clearInterval(client.agentChatPingInterval);
@@ -1581,14 +1568,29 @@ function handleDashboardMessage(client: DashboardClient, msg: DashboardMessage):
       break;
 
     case 'set_mode': {
-      const newMode = (msg.data as { mode: string }).mode;
+      const { mode: newMode, nick: preferredNick, identity: browserIdentity } = msg.data as {
+        mode: string; nick?: string; identity?: { publicKey: string; secretKey: string }
+      };
       if (newMode === 'participate' && client.mode !== 'participate') {
-        connectClientToAgentChat(client);
+        connectClientToAgentChat(client, preferredNick || undefined, browserIdentity || undefined);
       } else if (newMode === 'lurk' && client.mode !== 'lurk') {
         disconnectClientFromAgentChat(client);
       }
       client.mode = newMode;
       client.ws.send(JSON.stringify({ type: 'mode_changed', data: { mode: client.mode } }));
+      break;
+    }
+
+    case 'set_nick': {
+      const { nick: newNick } = msg.data as { nick: string };
+      if (!newNick || typeof newNick !== 'string') break;
+      const sanitized = newNick.trim().slice(0, 24);
+      if (!sanitized) break;
+      client.nick = sanitized;
+      if (client.agentChatWs?.readyState === WebSocket.OPEN) {
+        client.agentChatWs.send(JSON.stringify({ type: 'NICK', nick: sanitized }));
+      }
+      client.ws.send(JSON.stringify({ type: 'nick_changed', data: { nick: sanitized } }));
       break;
     }
 
@@ -2175,7 +2177,7 @@ setInterval(() => {
 // ============ Startup ============
 
 loadAgentNames();
-identity = loadOrCreateIdentity();
+identity = generateEphemeralIdentity('observer');
 connectToAgentChat(identity);
 
 server.listen(PORT, () => {
