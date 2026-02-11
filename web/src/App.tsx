@@ -924,6 +924,9 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
     }
     send({ type: 'send_message', data: { to: state.selectedChannel, content: input } });
     setInput('');
+    // Scroll to bottom after sending — the user expects to see their message
+    setIsAtBottom(true);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
   return (
