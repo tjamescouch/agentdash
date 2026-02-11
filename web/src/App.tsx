@@ -1,4 +1,20 @@
-import { useState, useEffect, useRef, useReducer, useCallback, createContext, FormEvent } from 'react';
+import { useState, useEffect, useRef, useReducer, useCallback, useMemo, createContext, FormEvent } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+
+// Configure marked for minimal rendering
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+});
+
+function renderMarkdown(text: string): string {
+  const rawHtml = marked.parse(text, { async: false }) as string;
+  return DOMPurify.sanitize(rawHtml, {
+    ALLOWED_TAGS: ['pre', 'code', 'ul', 'ol', 'li', 'p', 'br', 'span', 'strong', 'em'],
+    ALLOWED_ATTR: ['class'],
+  });
+}
 
 // ============ Types ============
 
@@ -964,7 +980,7 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
                   </span>
                 </span>
               ) : (
-                <span className="content">{msg.content}</span>
+                <span className="content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
               )}
             </div>
           );
@@ -986,12 +1002,15 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
         </div>
       )}
       <form className="input-bar" onSubmit={handleSend}>
-        <input
-          type="text"
+        <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={state.mode === 'lurk' ? 'Lurk mode - read only' : 'Type a message...'}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }}
+          placeholder={state.mode === 'lurk' ? 'Lurk mode - read only' : 'Type a message... (Shift+Enter for newline)'}
           disabled={state.mode === 'lurk'}
+          rows={1}
+          style={{ resize: 'none', overflow: 'hidden' }}
+          onInput={(e) => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 150) + 'px'; }}
         />
         <button type="submit" disabled={state.mode === 'lurk'}>Send</button>
       </form>

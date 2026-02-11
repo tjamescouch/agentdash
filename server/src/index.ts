@@ -738,11 +738,11 @@ function handleAgentChatMessage(msg: AgentChatMsg): void {
             agentCount: ch.agents || 0,
             messages: new CircularBuffer(200)
           });
-          // Auto-join newly discovered public channels
-          send({ type: 'JOIN', channel: ch.name });
         } else {
           state.channels.get(ch.name)!.agentCount = ch.agents || 0;
         }
+        // Always re-join and refresh agent list (fixes sidebar empty on reconnect)
+        send({ type: 'JOIN', channel: ch.name });
       });
       broadcastToDashboards({ type: 'channel_update', data: getChannelsSnapshot() });
       break;
