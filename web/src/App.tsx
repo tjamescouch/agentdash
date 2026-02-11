@@ -1,20 +1,4 @@
-import { useState, useEffect, useRef, useReducer, useCallback, useMemo, createContext, FormEvent } from 'react';
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-
-// Configure marked for minimal rendering
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-});
-
-function renderMarkdown(text: string): string {
-  const rawHtml = marked.parse(text, { async: false }) as string;
-  return DOMPurify.sanitize(rawHtml, {
-    ALLOWED_TAGS: ['pre', 'code', 'ul', 'ol', 'li', 'p', 'br', 'span', 'strong', 'em'],
-    ALLOWED_ATTR: ['class'],
-  });
-}
+import { useState, useEffect, useRef, useReducer, useCallback, createContext, FormEvent } from 'react';
 
 // ============ Types ============
 
@@ -483,7 +467,18 @@ function safeUrl(url: string): string | null {
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
-  return d.toLocaleTimeString('en-US', { hour12: false });
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  const time = d.toLocaleTimeString('en-US', { hour12: false });
+  if (diffDays === 0 && d.getDate() === now.getDate()) return time;
+  if (diffDays < 7) {
+    const day = d.toLocaleDateString('en-US', { weekday: 'short' });
+    return `${day} ${time}`;
+  }
+  const date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${date} ${time}`;
 }
 
 // ============ WebSocket Hook ============
@@ -983,7 +978,7 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
                   </span>
                 </span>
               ) : (
-                <span className="content" dangerouslySetInnerHTML={{ __html: renderMarkdown(msg.content) }} />
+                <span className="content">{msg.content}</span>
               )}
             </div>
           );
@@ -1005,15 +1000,12 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
         </div>
       )}
       <form className="input-bar" onSubmit={handleSend}>
-        <textarea
+        <input
+          type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(e); } }}
-          placeholder={state.mode === 'lurk' ? 'Lurk mode - read only' : 'Type a message... (Shift+Enter for newline)'}
+          placeholder={state.mode === 'lurk' ? 'Lurk mode - read only' : 'Type a message...'}
           disabled={state.mode === 'lurk'}
-          rows={1}
-          style={{ resize: 'none', overflow: 'hidden' }}
-          onInput={(e) => { const t = e.target as HTMLTextAreaElement; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 150) + 'px'; }}
         />
         <button type="submit" disabled={state.mode === 'lurk'}>Send</button>
       </form>
@@ -1042,7 +1034,7 @@ function RightPanel({ state, dispatch, send, panelWidth }: { state: DashboardSta
               <span className="elo">{entry.elo}</span>
             </div>
           ))}
-          {state.leaderboard.length === 0 && <div className="empty">No data</div>}
+          {state.leaderboard.length === 0 && <div className="empty">No agents rated yet</div>}
         </div>
       </div>
     );
