@@ -228,6 +228,51 @@ body {
   flex: 1;
 }
 
+.channel-join-form {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0 8px;
+}
+
+.channel-join-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  border-radius: 3px;
+  outline: none;
+}
+
+.channel-join-input:focus {
+  border-color: var(--text-primary);
+}
+
+.channel-join-input::placeholder {
+  color: var(--text-muted);
+}
+
+.channel-join-btn {
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.channel-join-btn:hover {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
 .member-count {
   font-size: 11px;
   color: var(--text-muted);

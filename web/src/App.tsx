@@ -771,7 +771,8 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
   );
 }
 
-function Sidebar({ state, dispatch, sidebarWidth }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; sidebarWidth: number }) {
+function Sidebar({ state, dispatch, sidebarWidth, send }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; sidebarWidth: number; send: WsSendFn }) {
+  const [joinInput, setJoinInput] = useState('');
   const agents = Object.values(state.agents).sort((a, b) => {
     if (a.online !== b.online) return b.online ? 1 : -1;
     return (a.nick || a.id).localeCompare(b.nick || b.id);
@@ -785,6 +786,17 @@ function Sidebar({ state, dispatch, sidebarWidth }: { state: DashboardState; dis
   };
 
   const channels = Object.values(state.channels);
+
+  const handleJoinChannel = (e: React.FormEvent) => {
+    e.preventDefault();
+    const raw = joinInput.trim();
+    if (!raw) return;
+    const channelName = raw.startsWith('#') ? raw : `#${raw}`;
+    if (!/^#[a-zA-Z0-9_-]+$/.test(channelName)) return;
+    send({ type: 'join_channel', data: { channel: channelName } });
+    dispatch({ type: 'SELECT_CHANNEL', channel: channelName });
+    setJoinInput('');
+  };
 
   return (
     <div className="sidebar" style={{ width: sidebarWidth }}>
@@ -813,6 +825,16 @@ function Sidebar({ state, dispatch, sidebarWidth }: { state: DashboardState; dis
 
       <div className="section">
         <h3>CHANNELS ({channels.length})</h3>
+        <form className="channel-join-form" onSubmit={handleJoinChannel}>
+          <input
+            type="text"
+            className="channel-join-input"
+            value={joinInput}
+            onChange={(e) => setJoinInput(e.target.value)}
+            placeholder="Join channel..."
+          />
+          <button type="submit" className="channel-join-btn" title="Join channel">+</button>
+        </form>
         <div className="list">
           {channels.map(channel => (
             <div
@@ -2426,7 +2448,7 @@ export default function App() {
         <TopBar state={state} dispatch={dispatch} send={send} />
         <div className="content-area">
           <div className="main">
-            <Sidebar state={state} dispatch={dispatch} sidebarWidth={sidebar.width} />
+            <Sidebar state={state} dispatch={dispatch} sidebarWidth={sidebar.width} send={send} />
             <div className="resize-handle" ref={sidebar.handleRef} onMouseDown={sidebar.onMouseDown} />
             {state.pulseOpen ? (
               <NetworkPulse state={state} dispatch={dispatch} />
