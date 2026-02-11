@@ -553,7 +553,7 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
             const saved = getSavedChannels();
             for (const ch of saved) {
               if (!serverChannels.has(ch)) {
-                ws.current!.send(JSON.stringify({ type: 'join_channel', data: { channel: ch } }));
+                ws.current?.send(JSON.stringify({ type: 'join_channel', data: { channel: ch } }));
               }
             }
             break;
