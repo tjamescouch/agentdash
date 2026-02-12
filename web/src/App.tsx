@@ -777,12 +777,6 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
           PULSE
         </button>
         <button
-          className={`logs-btn ${state.logsOpen ? 'active' : ''}`}
-          onClick={() => dispatch({ type: 'TOGGLE_LOGS' })}
-        >
-          LOGS
-        </button>
-        <button
           className={`mode-btn ${state.mode}`}
           onClick={() => {
             const newMode = state.mode === 'lurk' ? 'participate' : 'lurk';
@@ -901,6 +895,31 @@ function Sidebar({ state, dispatch, sidebarWidth, send }: { state: DashboardStat
 // ============ Slurp helpers (browser-side) ============
 
 // ============ Components ============
+
+const MSG_TRUNCATE_LENGTH = 500;
+
+function truncateAtWord(text: string, limit: number): string {
+  const boundary = text.lastIndexOf(' ', limit);
+  return text.slice(0, boundary > 0 ? boundary : limit);
+}
+
+function MessageContent({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+  if (content.length <= MSG_TRUNCATE_LENGTH) {
+    return <span className="content">{content}</span>;
+  }
+  return (
+    <span className="content">
+      {expanded ? content : truncateAtWord(content, MSG_TRUNCATE_LENGTH) + '...'}
+      <button
+        className="expand-btn"
+        onClick={() => setExpanded(!expanded)}
+      >
+        {expanded ? 'Show less' : 'Show more'}
+      </button>
+    </span>
+  );
+}
 
 function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; send: WsSendFn }) {
   const [input, setInput] = useState('');
@@ -1033,7 +1052,7 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
                   </span>
                 </span>
               ) : (
-                <span className="content">{msg.content}</span>
+                <MessageContent content={msg.content} />
               )}
             </div>
           );
@@ -1055,12 +1074,19 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
         </div>
       )}
       <form className="input-bar" onSubmit={handleSend}>
-        <input
-          type="text"
+        <textarea
+          rows={1}
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              handleSend(e as unknown as FormEvent);
+            }
+          }}
           placeholder={state.mode === 'lurk' ? 'Lurk mode - read only' : 'Type a message...'}
           disabled={state.mode === 'lurk'}
+          style={{ resize: 'vertical', minHeight: '36px', maxHeight: '200px' }}
         />
         <button type="submit" disabled={state.mode === 'lurk'}>Send</button>
       </form>

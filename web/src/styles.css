@@ -383,6 +383,24 @@ body {
   white-space: pre-wrap;
 }
 
+.expand-btn {
+  display: inline;
+  margin-left: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.6;
+}
+
+.expand-btn:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .typing-indicator {
   padding: 2px 14px 2px;
   font-size: 12px;
@@ -404,7 +422,8 @@ body {
   background: var(--bg-secondary);
 }
 
-.input-bar input {
+.input-bar input,
+.input-bar textarea {
   flex: 1;
   padding: 10px 14px;
   background: var(--bg-tertiary);
@@ -416,11 +435,20 @@ body {
   outline: none;
 }
 
-.input-bar input:focus {
+.input-bar textarea {
+  resize: vertical;
+  min-height: 36px;
+  max-height: 200px;
+  line-height: 1.4;
+}
+
+.input-bar input:focus,
+.input-bar textarea:focus {
   border-color: var(--text-primary);
 }
 
-.input-bar input:disabled {
+.input-bar input:disabled,
+.input-bar textarea:disabled {
   opacity: 0.5;
 }
 
@@ -973,7 +1001,8 @@ body {
 }
 
 /* Input cursor blink */
-.input-bar input::placeholder {
+.input-bar input::placeholder,
+.input-bar textarea::placeholder {
   animation: blink-cursor 1s step-end infinite;
 }
 
@@ -2030,7 +2059,7 @@ body {
   .topbar-left { gap: 8px; }
   .topbar-right { gap: 8px; }
   .input-bar { padding: 8px; gap: 4px; }
-  .input-bar input { padding: 8px 10px; font-size: 16px; }
+  .input-bar input, .input-bar textarea { padding: 8px 10px; font-size: 16px; }
   .input-bar button { padding: 8px 14px; }
   .mode-btn { padding: 4px 8px; font-size: 11px; }
   .dashboard-nick { display: none; }
@@ -2039,7 +2068,7 @@ body {
 @media (max-width: 480px) {
   .topbar { padding: 6px 8px; }
   .logo { font-size: 14px; }
-  .input-bar input { font-size: 16px; }
+  .input-bar input, .input-bar textarea { font-size: 16px; }
 }
 
 /* ============ File Bubble ============ */
