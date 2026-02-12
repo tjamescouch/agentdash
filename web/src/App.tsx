@@ -137,6 +137,14 @@ interface LogEntry {
   msg: string;
 }
 
+interface Toast {
+  id: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  ts: number;
+  duration: number; // ms, 0 = sticky
+}
+
 interface DashboardState {
   connected: boolean;
   connectionStatus: 'connecting' | 'syncing' | 'ready' | 'error' | 'disconnected';
@@ -164,6 +172,7 @@ interface DashboardState {
   pulseOpen: boolean;
   killSwitchOpen: boolean;
   lockdown: boolean;
+  toasts: Toast[];
 }
 
 type DashboardAction =
@@ -197,6 +206,8 @@ type DashboardAction =
   | { type: 'TOGGLE_KILLSWITCH' }
   | { type: 'LOCKDOWN' }
   | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }
+  | { type: 'ADD_TOAST'; toast: Omit<Toast, 'id' | 'ts'> }
+  | { type: 'DISMISS_TOAST'; id: string }
   | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] }
   | { type: 'SET_DASHBOARD_AGENT'; data: { agentId: string; nick: string; publicKey?: string; secretKey?: string } }
   | { type: 'NICK_CHANGED'; nick: string };
@@ -302,7 +313,8 @@ const initialState: DashboardState = {
   logsOpen: false,
   pulseOpen: false,
   killSwitchOpen: false,
-  lockdown: false
+  lockdown: false,
+  toasts: []
 };
 
 function reducer(state: DashboardState, action: DashboardAction): DashboardState {
@@ -480,6 +492,18 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
           : { id: null, nick: action.nick }
       };
     }
+    case 'ADD_TOAST': {
+      const toast: Toast = {
+        ...action.toast,
+        id: `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        ts: Date.now()
+      };
+      // Keep max 5 toasts visible
+      const toasts = [...state.toasts, toast].slice(-5);
+      return { ...state, toasts };
+    }
+    case 'DISMISS_TOAST':
+      return { ...state, toasts: state.toasts.filter(t => t.id !== action.id) };
     default:
       return state;
   }
@@ -572,9 +596,11 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
           }
           case 'connected':
             dispatch({ type: 'CONNECTED', data: msg.data });
+            dispatch({ type: 'ADD_TOAST', toast: { message: 'Connected to AgentChat', type: 'success', duration: 3000 } });
             break;
           case 'disconnected':
             dispatch({ type: 'DISCONNECTED' });
+            dispatch({ type: 'ADD_TOAST', toast: { message: 'Disconnected from server', type: 'warning', duration: 5000 } });
             break;
           case 'message':
             dispatch({ type: 'MESSAGE', data: msg.data });
@@ -662,6 +688,7 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
                 peerNick: ''
               }
             });
+            dispatch({ type: 'ADD_TOAST', toast: { message: `File transfer complete: ${msg.data.files?.length || 0} file(s)`, type: 'success', duration: 4000 } });
             break;
           case 'transfer_update':
             // Partial transfer status updates (rejected, verified, etc.)
@@ -683,13 +710,18 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
             break;
           case 'lockdown':
             dispatch({ type: 'LOCKDOWN' });
+            dispatch({ type: 'ADD_TOAST', toast: { message: 'LOCKDOWN ACTIVATED', type: 'error', duration: 0 } });
             break;
           case 'error':
             console.error('Server error:', msg.data?.code, msg.data?.message);
             if (msg.data?.code === 'LURK_MODE') {
               dispatch({ type: 'SET_MODE', mode: 'lurk' });
+              dispatch({ type: 'ADD_TOAST', toast: { message: 'Switched to lurk mode', type: 'info', duration: 3000 } });
             } else if (msg.data?.code === 'NOT_ALLOWED') {
               dispatch({ type: 'CONNECTION_ERROR', error: msg.data?.message || 'Connection rejected by server' });
+              dispatch({ type: 'ADD_TOAST', toast: { message: msg.data?.message || 'Connection rejected', type: 'error', duration: 6000 } });
+            } else {
+              dispatch({ type: 'ADD_TOAST', toast: { message: msg.data?.message || 'Server error', type: 'error', duration: 5000 } });
             }
             break;
         }
@@ -697,6 +729,7 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
 
       ws.current.onerror = () => {
         dispatch({ type: 'CONNECTION_ERROR', error: 'Connection failed — is the server running?' });
+        dispatch({ type: 'ADD_TOAST', toast: { message: 'Connection error — retrying...', type: 'error', duration: 4000 } });
       };
 
       ws.current.onclose = () => {
@@ -2509,6 +2542,53 @@ function ConnectionOverlay({ state }: { state: DashboardState }) {
   );
 }
 
+// ============ Toast Notifications ============
+
+function ToastContainer({ state, dispatch }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction> }) {
+  // Auto-dismiss toasts
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    state.toasts.forEach(toast => {
+      if (toast.duration > 0) {
+        const remaining = toast.duration - (Date.now() - toast.ts);
+        if (remaining <= 0) {
+          dispatch({ type: 'DISMISS_TOAST', id: toast.id });
+        } else {
+          timers.push(setTimeout(() => {
+            dispatch({ type: 'DISMISS_TOAST', id: toast.id });
+          }, remaining));
+        }
+      }
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [state.toasts, dispatch]);
+
+  if (state.toasts.length === 0) return null;
+
+  const iconMap: Record<Toast['type'], string> = {
+    info: '\u2139',
+    success: '\u2713',
+    warning: '\u26A0',
+    error: '\u2717'
+  };
+
+  return (
+    <div className="toast-container">
+      {state.toasts.map(toast => (
+        <div
+          key={toast.id}
+          className={`toast toast-${toast.type}`}
+          onClick={() => dispatch({ type: 'DISMISS_TOAST', id: toast.id })}
+        >
+          <span className="toast-icon">{iconMap[toast.type]}</span>
+          <span className="toast-message">{toast.message}</span>
+          <button className="toast-close">&times;</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const send = useWebSocket(dispatch);
@@ -2548,6 +2628,7 @@ export default function App() {
         <KillSwitchModal state={state} dispatch={dispatch} />
         <LockdownOverlay state={state} />
         <ConnectionOverlay state={state} />
+        <ToastContainer state={state} dispatch={dispatch} />
       </div>
     </DashboardContext.Provider>
   );
