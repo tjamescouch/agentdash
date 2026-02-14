@@ -164,6 +164,7 @@ interface DashboardState {
   pulseOpen: boolean;
   killSwitchOpen: boolean;
   lockdown: boolean;
+  hideOfflineAgents: boolean;
 }
 
 type DashboardAction =
@@ -302,7 +303,8 @@ const initialState: DashboardState = {
   logsOpen: false,
   pulseOpen: false,
   killSwitchOpen: false,
-  lockdown: false
+  lockdown: false,
+  hideOfflineAgents: true
 };
 
 function reducer(state: DashboardState, action: DashboardAction): DashboardState {
@@ -401,6 +403,9 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
         localStorage.setItem('dashboardMode', action.mode);
       }
       return { ...state, mode: action.mode };
+
+    case 'SET_HIDE_OFFLINE_AGENTS':
+      return { ...state, hideOfflineAgents: action.value };
     case 'SELECT_CHANNEL': {
       const clearedUnread = { ...state.unreadCounts };
       delete clearedUnread[action.channel];
@@ -811,7 +816,9 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
 
 function Sidebar({ state, dispatch, sidebarWidth, send }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; sidebarWidth: number; send: WsSendFn }) {
   const [joinInput, setJoinInput] = useState('');
-  const agents = Object.values(state.agents).sort((a, b) => {
+  const agents = Object.values(state.agents)
+    .filter(a => !state.hideOfflineAgents || a.online)
+    .sort((a, b) => {
     if (a.online !== b.online) return b.online ? 1 : -1;
     return (a.nick || a.id).localeCompare(b.nick || b.id);
   });
@@ -840,7 +847,17 @@ function Sidebar({ state, dispatch, sidebarWidth, send }: { state: DashboardStat
   return (
     <div className="sidebar" style={{ width: sidebarWidth }}>
       <div className="section">
+        <div className="sidebar-title-row">
         <h3>AGENTS ({agents.length})</h3>
+        <label className="sidebar-toggle" title="Hide offline agents">
+          <input
+            type="checkbox"
+            checked={state.hideOfflineAgents}
+            onChange={(e) => dispatch({ type: 'SET_HIDE_OFFLINE_AGENTS', value: e.target.checked })}
+          />
+          Hide offline
+        </label>
+      </div>
         <div className="list">
           {agents.map(agent => (
             <div
