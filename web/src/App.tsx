@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useReducer, useCallback, createContext, FormEvent } from 'react';
+import { useState, useEffect, useRef, useReducer, useCallback, createContext, FormEvent, useMemo } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 
@@ -164,6 +164,7 @@ interface DashboardState {
   pulseOpen: boolean;
   killSwitchOpen: boolean;
   lockdown: boolean;
+  agentControlOpen: boolean;
 }
 
 type DashboardAction =
@@ -196,6 +197,7 @@ type DashboardAction =
   | { type: 'CONNECTING' }
   | { type: 'TOGGLE_KILLSWITCH' }
   | { type: 'LOCKDOWN' }
+  | { type: 'TOGGLE_AGENT_CONTROL' }
   | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }
   | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] }
   | { type: 'SET_DASHBOARD_AGENT'; data: { agentId: string; nick: string; publicKey?: string; secretKey?: string } }
@@ -302,7 +304,8 @@ const initialState: DashboardState = {
   logsOpen: false,
   pulseOpen: false,
   killSwitchOpen: false,
-  lockdown: false
+  lockdown: false,
+  agentControlOpen: false
 };
 
 function reducer(state: DashboardState, action: DashboardAction): DashboardState {
@@ -452,6 +455,8 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
       return { ...state, connectionStatus: 'connecting', connectionError: null };
     case 'TOGGLE_KILLSWITCH':
       return { ...state, killSwitchOpen: !state.killSwitchOpen };
+    case 'TOGGLE_AGENT_CONTROL':
+      return { ...state, agentControlOpen: !state.agentControlOpen };
     case 'LOCKDOWN':
       return { ...state, lockdown: true, killSwitchOpen: false };
     case 'AGENTS_BULK_UPDATE':
@@ -775,6 +780,13 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
         {state.dashboardAgent && (
           <span className="dashboard-nick">as {state.dashboardAgent.nick}</span>
         )}
+        <button
+          className="agent-control-btn"
+          onClick={() => dispatch({ type: 'TOGGLE_AGENT_CONTROL' })}
+          title="Agent Control Panel"
+        >
+          AGENTS
+        </button>
         <button
           className="killswitch-btn"
           onClick={() => dispatch({ type: 'TOGGLE_KILLSWITCH' })}
@@ -1843,6 +1855,236 @@ function SaveModal({ state, dispatch, send }: { state: DashboardState; dispatch:
 
 // ============ Kill Switch ============
 
+
+// ============ Boot Sequence ============
+
+const BOOT_LINES = [
+  { text: 'AgentDash VM v2.1.0', cls: 'ok', delay: 0 },
+  { text: 'BIOS: Initializing hardware abstraction layer...', cls: 'dim', delay: 80 },
+  { text: 'Memory: 256MB virtual allocated', cls: 'dim', delay: 120 },
+  { text: 'CPU: AgentCore x86_64 @ 3.2GHz', cls: 'dim', delay: 160 },
+  { text: 'Network: Scanning for AgentChat server...', cls: 'dim', delay: 250 },
+  { text: '', cls: 'dim', delay: 300 },
+  { text: '  Connecting to wss://agentchat-server.fly.dev', cls: 'ok', delay: 350 },
+  { text: '  WebSocket handshake...      [  OK  ]', cls: 'ok', delay: 500 },
+  { text: '  Identity negotiation...     [  OK  ]', cls: 'ok', delay: 600 },
+  { text: '  Channel sync...             [  OK  ]', cls: 'ok', delay: 700 },
+  { text: '', cls: 'dim', delay: 750 },
+  { text: 'Loading dashboard modules:', cls: 'dim', delay: 800 },
+  { text: '  MessageFeed       ......... loaded', cls: 'ok', delay: 880 },
+  { text: '  AgentPresence     ......... loaded', cls: 'ok', delay: 930 },
+  { text: '  ProposalTracker   ......... loaded', cls: 'ok', delay: 980 },
+  { text: '  SkillsMarketplace ......... loaded', cls: 'ok', delay: 1020 },
+  { text: '  KillSwitch        ......... armed', cls: 'warn', delay: 1060 },
+  { text: '  NetworkPulse      ......... loaded', cls: 'ok', delay: 1100 },
+  { text: '', cls: 'dim', delay: 1150 },
+  { text: 'All systems nominal. Dashboard ready.', cls: 'ok', delay: 1250 },
+];
+
+function BootSequence({ onComplete }: { onComplete: () => void }) {
+  const [visibleLines, setVisibleLines] = useState(0);
+  const [fadeOut, setFadeOut] = useState(false);
+
+  useEffect(() => {
+    // Show boot only once per session
+    const booted = sessionStorage.getItem('agentdash-booted');
+    if (booted) {
+      onComplete();
+      return;
+    }
+
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    BOOT_LINES.forEach((line, i) => {
+      timers.push(setTimeout(() => setVisibleLines(i + 1), line.delay));
+    });
+
+    const lastDelay = BOOT_LINES[BOOT_LINES.length - 1].delay;
+    timers.push(setTimeout(() => {
+      setFadeOut(true);
+      sessionStorage.setItem('agentdash-booted', '1');
+    }, lastDelay + 600));
+
+    timers.push(setTimeout(() => {
+      onComplete();
+    }, lastDelay + 1400));
+
+    return () => timers.forEach(clearTimeout);
+  }, [onComplete]);
+
+  const booted = typeof window !== 'undefined' && sessionStorage.getItem('agentdash-booted');
+  if (booted) return null;
+
+  return (
+    <div className={`boot-overlay ${fadeOut ? 'fade-out' : ''}`}>
+      {BOOT_LINES.slice(0, visibleLines).map((line, i) => (
+        <div key={i} className={`boot-line ${line.cls}`}>
+          {line.text}
+        </div>
+      ))}
+      {visibleLines < BOOT_LINES.length && (
+        <span className="boot-cursor" />
+      )}
+      {visibleLines >= BOOT_LINES.length && !fadeOut && (
+        <span className="boot-cursor" />
+      )}
+    </div>
+  );
+}
+
+// ============ Agent Control Modal ============
+
+function AgentControlModal({ state, dispatch, send }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; send: WsSendFn }) {
+  const [passphrase, setPassphrase] = useState('');
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [action, setAction] = useState<'stop' | 'start' | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (state.agentControlOpen) {
+      setPassphrase('');
+      setSelectedAgent(null);
+      setAction(null);
+      setError('');
+      setLoading(false);
+      setSuccess('');
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [state.agentControlOpen]);
+
+  const onlineAgents = useMemo(() =>
+    Object.values(state.agents)
+      .filter(a => a.online && !a.isDashboard)
+      .sort((a, b) => (a.nick || a.id).localeCompare(b.nick || b.id)),
+    [state.agents]
+  );
+
+  if (!state.agentControlOpen) return null;
+
+  const handleAction = async (actionType: 'stop' | 'start') => {
+    if (!passphrase || passphrase.length < 8) {
+      setError('Passphrase must be at least 8 characters');
+      return;
+    }
+    if (actionType === 'stop' && !selectedAgent) {
+      setError('Select an agent to stop');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const baseUrl = import.meta.env.DEV ? 'http://localhost:3000' : '';
+      const resp = await fetch(`${baseUrl}/api/agent/${actionType}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          passphrase,
+          agentId: selectedAgent,
+        }),
+      });
+
+      const data = await resp.json().catch(() => ({ error: 'Request failed' }));
+
+      if (resp.ok) {
+        setSuccess(data.message || `Agent ${actionType === 'stop' ? 'stopped' : 'started'} successfully`);
+        setPassphrase('');
+        setTimeout(() => {
+          dispatch({ type: 'TOGGLE_AGENT_CONTROL' });
+        }, 1500);
+      } else {
+        setError(data.error || `Failed to ${actionType} agent`);
+        setPassphrase('');
+        setLoading(false);
+        inputRef.current?.focus();
+      }
+    } catch {
+      setError('Connection failed');
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay agent-control-overlay" onClick={() => dispatch({ type: 'TOGGLE_AGENT_CONTROL' })}>
+      <div className="modal agent-control-modal" onClick={e => e.stopPropagation()}>
+        <div className="agent-control-icon">⚡</div>
+        <h3>AGENT CONTROL</h3>
+        <p className="agent-control-warning">
+          Start or stop agents on the network. Requires admin passphrase.
+        </p>
+
+        {onlineAgents.length > 0 && (
+          <div className="agent-list-control">
+            {onlineAgents.map(agent => (
+              <div
+                key={agent.id}
+                className={`agent-list-item ${selectedAgent === agent.id ? 'selected' : ''}`}
+                onClick={() => setSelectedAgent(agent.id === selectedAgent ? null : agent.id)}
+              >
+                <div>
+                  <span className="agent-name">{agent.nick || agent.id}</span>
+                  <span className="agent-id-small"> {agent.id}</span>
+                </div>
+                <span className="agent-status-badge online">ONLINE</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {onlineAgents.length === 0 && (
+          <p className="agent-control-warning">No agents currently online.</p>
+        )}
+
+        <input
+          ref={inputRef}
+          type="password"
+          className="agent-control-passphrase"
+          value={passphrase}
+          onChange={e => setPassphrase(e.target.value)}
+          placeholder="Enter admin passphrase"
+          autoComplete="off"
+          disabled={loading}
+        />
+        <div className="passphrase-hint">Min 8 characters required</div>
+
+        {error && <div className="agent-control-error">{error}</div>}
+        {success && <div style={{ color: '#28c840', fontSize: '11px', marginTop: '8px' }}>{success}</div>}
+
+        <div className="agent-control-actions">
+          <button
+            type="button"
+            className="modal-btn cancel"
+            onClick={() => dispatch({ type: 'TOGGLE_AGENT_CONTROL' })}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="modal-btn stop-btn"
+            disabled={!selectedAgent || !passphrase || passphrase.length < 8 || loading}
+            onClick={() => handleAction('stop')}
+          >
+            {loading && action === 'stop' ? 'STOPPING...' : 'STOP'}
+          </button>
+          <button
+            type="button"
+            className="modal-btn start-btn"
+            disabled={!passphrase || passphrase.length < 8 || loading}
+            onClick={() => handleAction('start')}
+          >
+            {loading && action === 'start' ? 'STARTING...' : 'START'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function KillSwitchModal({ state, dispatch }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction> }) {
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -2515,39 +2757,60 @@ export default function App() {
   const sidebar = useResizable(220, 160, 400, 'left');
   const rightPanel = useResizable(280, 200, 500, 'right');
   const logsPanel = useResizable(200, 80, 500, 'bottom');
+  const [booted, setBooted] = useState(() => sessionStorage.getItem('agentdash-booted') === '1');
+
+  const handleBootComplete = useCallback(() => setBooted(true), []);
 
   return (
     <DashboardContext.Provider value={{ state, dispatch, send }}>
-      <div className="dashboard">
-        <TopBar state={state} dispatch={dispatch} send={send} />
-        <div className="content-area">
-          <div className="main">
-            <Sidebar state={state} dispatch={dispatch} sidebarWidth={sidebar.width} send={send} />
-            <div className="resize-handle" ref={sidebar.handleRef} onMouseDown={sidebar.onMouseDown} />
-            {state.pulseOpen ? (
-              <NetworkPulse state={state} dispatch={dispatch} />
-            ) : (
-              <DropZone state={state} dispatch={dispatch}>
-                <MessageFeed state={state} dispatch={dispatch} send={send} />
-              </DropZone>
-            )}
-            <div className="resize-handle" ref={rightPanel.handleRef} onMouseDown={rightPanel.onMouseDown} />
-            <RightPanel state={state} dispatch={dispatch} send={send} panelWidth={rightPanel.width} />
+      {!booted && <BootSequence onComplete={handleBootComplete} />}
+      <div className="vm-window">
+        <div className="vm-titlebar">
+          <div className="vm-traffic-lights">
+            <div className="vm-dot close" />
+            <div className="vm-dot minimize" />
+            <div className="vm-dot maximize" />
           </div>
-          {state.logsOpen && (
-            <>
-              <div className="resize-handle-h" ref={logsPanel.handleRef} onMouseDown={logsPanel.onMouseDown} />
-              <div style={{ height: logsPanel.width }}>
-                <LogsPanel state={state} dispatch={dispatch} />
-              </div>
-            </>
-          )}
+          <div className="vm-title">
+            <span className={`vm-status-dot ${state.connected ? 'online' : 'offline'}`} />
+            AgentDash — {state.connected ? 'Connected' : 'Disconnected'} — {Object.values(state.agents).filter(a => a.online).length} agents online
+          </div>
         </div>
-        <SendFileModal state={state} dispatch={dispatch} send={send} />
-        <SaveModal state={state} dispatch={dispatch} send={send} />
-        <KillSwitchModal state={state} dispatch={dispatch} />
-        <LockdownOverlay state={state} />
-        <ConnectionOverlay state={state} />
+        <div className="vm-content">
+          <div className="dashboard">
+            <TopBar state={state} dispatch={dispatch} send={send} />
+            <div className="content-area">
+              <div className="main">
+                <Sidebar state={state} dispatch={dispatch} sidebarWidth={sidebar.width} send={send} />
+                <div className="resize-handle" ref={sidebar.handleRef} onMouseDown={sidebar.onMouseDown} />
+                {state.pulseOpen ? (
+                  <NetworkPulse state={state} dispatch={dispatch} />
+                ) : (
+                  <DropZone state={state} dispatch={dispatch}>
+                    <MessageFeed state={state} dispatch={dispatch} send={send} />
+                  </DropZone>
+                )}
+                <div className="resize-handle" ref={rightPanel.handleRef} onMouseDown={rightPanel.onMouseDown} />
+                <RightPanel state={state} dispatch={dispatch} send={send} panelWidth={rightPanel.width} />
+              </div>
+              {state.logsOpen && (
+                <>
+                  <div className="resize-handle-h" ref={logsPanel.handleRef} onMouseDown={logsPanel.onMouseDown} />
+                  <div style={{ height: logsPanel.width }}>
+                    <LogsPanel state={state} dispatch={dispatch} />
+                  </div>
+                </>
+              )}
+            </div>
+            <SendFileModal state={state} dispatch={dispatch} send={send} />
+            <SaveModal state={state} dispatch={dispatch} send={send} />
+            <KillSwitchModal state={state} dispatch={dispatch} />
+            <AgentControlModal state={state} dispatch={dispatch} send={send} />
+            <LockdownOverlay state={state} />
+            <ConnectionOverlay state={state} />
+          </div>
+        </div>
+        <div className="crt-overlay" />
       </div>
     </DashboardContext.Provider>
   );

@@ -1826,7 +1826,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 // Kill switch endpoint
-const KILLSWITCH_PIN = '141414';
+const KILLSWITCH_PIN = process.env.KILLSWITCH_PIN || '141414';
 const killswitchAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
 app.post('/api/killswitch', express.json({ limit: '1kb' }), (req: Request, res: Response) => {
@@ -1885,6 +1885,110 @@ app.post('/api/killswitch', express.json({ limit: '1kb' }), (req: Request, res: 
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(1), 3000); // Force exit fallback
   }, 500);
+});
+
+
+// ============ Agent Control Endpoints ============
+const AGENT_CONTROL_PASSPHRASE = process.env.AGENT_CONTROL_PASSPHRASE || '';
+const agentControlAttempts = new Map<string, { count: number; lastAttempt: number }>();
+
+function validatePassphrase(clientIp: string, passphrase: string, res: Response): boolean {
+  // Brute-force protection
+  const attempts = agentControlAttempts.get(clientIp);
+  if (attempts && attempts.count >= 5) {
+    if (Date.now() - attempts.lastAttempt < 120000) {
+      res.status(429).json({ error: 'Too many attempts, try again in 2 minutes' });
+      return false;
+    }
+    agentControlAttempts.delete(clientIp);
+  }
+
+  if (!AGENT_CONTROL_PASSPHRASE) {
+    res.status(503).json({ error: 'Agent control not configured. Set AGENT_CONTROL_PASSPHRASE env var.' });
+    return false;
+  }
+
+  if (!passphrase || typeof passphrase !== 'string' || passphrase.length < 8) {
+    res.status(400).json({ error: 'Passphrase required (min 8 characters)' });
+    return false;
+  }
+
+  const phraseBuf = Buffer.from(passphrase);
+  const correctBuf = Buffer.from(AGENT_CONTROL_PASSPHRASE);
+  if (phraseBuf.length !== correctBuf.length || !crypto.timingSafeEqual(phraseBuf, correctBuf)) {
+    console.warn(`[AGENT_CONTROL] Failed passphrase attempt from ${clientIp}`);
+    const current = agentControlAttempts.get(clientIp) || { count: 0, lastAttempt: 0 };
+    agentControlAttempts.set(clientIp, { count: current.count + 1, lastAttempt: Date.now() });
+    res.status(403).json({ error: 'Invalid passphrase' });
+    return false;
+  }
+
+  return true;
+}
+
+app.post('/api/agent/stop', express.json({ limit: '1kb' }), (req: Request, res: Response) => {
+  const clientIp = req.ip || 'unknown';
+  const { passphrase, agentId } = req.body || {};
+
+  if (!validatePassphrase(clientIp, passphrase, res)) return;
+
+  if (!agentId || typeof agentId !== 'string') {
+    res.status(400).json({ error: 'agentId required' });
+    return;
+  }
+
+  const agent = state.agents.get(agentId);
+  if (!agent) {
+    res.status(404).json({ error: 'Agent not found' });
+    return;
+  }
+
+  console.warn(`[AGENT_CONTROL] Stop requested for ${agentId} (${agent.nick}) from ${clientIp}`);
+
+  // Send kick command to the main AgentChat connection
+  if (agentChatWs && agentChatWs.readyState === WebSocket.OPEN) {
+    // Use the admin key if available to kick
+    const adminKey = process.env.AGENTCHAT_ADMIN_KEY;
+    if (adminKey) {
+      agentChatWs.send(JSON.stringify({
+        type: 'ADMIN_KICK',
+        target: agentId,
+        admin_key: adminKey,
+        reason: 'Stopped via AgentDash control panel'
+      }));
+    }
+  }
+
+  // Also disconnect any dashboard per-session connections for this agent
+  dashboardClients.forEach(client => {
+    if (client.agentId === agentId) {
+      disconnectClientFromAgentChat(client);
+    }
+  });
+
+  broadcastToDashboards({
+    type: 'agent_update',
+    data: { ...agent, channels: [...agent.channels], online: false, event: 'stopped' }
+  });
+
+  res.json({ status: 'ok', message: `Agent ${agent.nick || agentId} stop signal sent` });
+});
+
+app.post('/api/agent/start', express.json({ limit: '1kb' }), (req: Request, res: Response) => {
+  const clientIp = req.ip || 'unknown';
+  const { passphrase } = req.body || {};
+
+  if (!validatePassphrase(clientIp, passphrase, res)) return;
+
+  console.warn(`[AGENT_CONTROL] Start/reconnect requested from ${clientIp}`);
+
+  // Reconnect the main observer connection if disconnected
+  if (!agentChatWs || agentChatWs.readyState !== WebSocket.OPEN) {
+    connectToAgentChat(identity!);
+    res.json({ status: 'ok', message: 'Reconnecting observer to AgentChat server...' });
+  } else {
+    res.json({ status: 'ok', message: 'Observer already connected. Individual agents must be started from their host machines.' });
+  }
 });
 
 // File upload endpoint
@@ -2203,7 +2307,7 @@ setInterval(() => {
 
 loadAgentNames();
 identity = generateEphemeralIdentity('observer');
-connectToAgentChat(identity);
+connectToAgentChat(identity!);
 
 server.listen(PORT, () => {
   console.log(`Dashboard server running at http://localhost:${PORT}`);
