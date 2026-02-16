@@ -137,6 +137,38 @@ interface LogEntry {
   msg: string;
 }
 
+
+interface TokenModelUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  requestCount: number;
+}
+
+interface TokenAgentUsage {
+  agent: string;
+  models: TokenModelUsage[];
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  totalRequests: number;
+  firstSeen: number;
+  lastSeen: number;
+}
+
+interface TokenUsageSummary {
+  agents: TokenAgentUsage[];
+  totals: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    totalRequests: number;
+  };
+  windowStart: number;
+  windowEnd: number;
+}
+
 interface DashboardState {
   connected: boolean;
   connectionStatus: 'connecting' | 'syncing' | 'ready' | 'error' | 'disconnected';
@@ -165,6 +197,7 @@ interface DashboardState {
   killSwitchOpen: boolean;
   lockdown: boolean;
   agentControlOpen: boolean;
+  tokenUsage: TokenUsageSummary | null;
 }
 
 type DashboardAction =
@@ -201,7 +234,8 @@ type DashboardAction =
   | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }
   | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] }
   | { type: 'SET_DASHBOARD_AGENT'; data: { agentId: string; nick: string; publicKey?: string; secretKey?: string } }
-  | { type: 'NICK_CHANGED'; nick: string };
+  | { type: 'NICK_CHANGED'; nick: string }
+  | { type: 'TOKEN_USAGE_UPDATE'; data: TokenUsageSummary };
 
 interface StateSyncPayload {
   agents: Agent[];
@@ -212,6 +246,7 @@ interface StateSyncPayload {
   proposals: Proposal[];
   disputes: Dispute[];
   dashboardAgent: DashboardAgent;
+  tokenUsage?: TokenUsageSummary;
 }
 
 type WsSendFn = (msg: Record<string, unknown>) => void;
@@ -305,7 +340,8 @@ const initialState: DashboardState = {
   pulseOpen: false,
   killSwitchOpen: false,
   lockdown: false,
-  agentControlOpen: false
+  agentControlOpen: false,
+  tokenUsage: null
 };
 
 function reducer(state: DashboardState, action: DashboardAction): DashboardState {
@@ -335,7 +371,8 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
         skills: action.data.skills || [],
         proposals: Object.fromEntries((action.data.proposals || []).map(p => [p.id, p])),
         disputes: Object.fromEntries((action.data.disputes || []).map(d => [d.id, d])),
-        dashboardAgent: action.data.dashboardAgent
+        dashboardAgent: action.data.dashboardAgent,
+        tokenUsage: action.data.tokenUsage || null
       };
     }
     case 'CONNECTED':
@@ -476,6 +513,8 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
       }
       return { ...state, dashboardAgent: agent };
     }
+    case 'TOKEN_USAGE_UPDATE':
+      return { ...state, tokenUsage: action.data };
     case 'NICK_CHANGED': {
       if (typeof window !== 'undefined') localStorage.setItem('dashboardNick', action.nick);
       return {
@@ -601,6 +640,9 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
             break;
           case 'leaderboard_update':
             dispatch({ type: 'LEADERBOARD_UPDATE', data: msg.data });
+            break;
+          case 'token_usage':
+            dispatch({ type: 'TOKEN_USAGE_UPDATE', data: msg.data });
             break;
           case 'skills_update':
             dispatch({ type: 'SKILLS_UPDATE', data: msg.data });
@@ -911,6 +953,7 @@ function Sidebar({ state, dispatch, sidebarWidth, send }: { state: DashboardStat
         <button onClick={() => dispatch({ type: 'SET_RIGHT_PANEL', panel: 'skills' })}>Skills</button>
         <button onClick={() => dispatch({ type: 'SET_RIGHT_PANEL', panel: 'proposals' })}>Proposals</button>
         <button onClick={() => dispatch({ type: 'SET_RIGHT_PANEL', panel: 'disputes' })}>Disputes</button>
+        <button onClick={() => dispatch({ type: 'SET_RIGHT_PANEL', panel: 'usage' })}>Usage</button>
       </div>
     </div>
   );
@@ -1211,6 +1254,78 @@ function RightPanel({ state, dispatch, send, panelWidth }: { state: DashboardSta
           ))}
           {proposals.length === 0 && <div className="empty">No active proposals</div>}
         </div>
+      </div>
+    );
+  }
+
+
+  if (state.rightPanel === 'usage') {
+    const usage = state.tokenUsage;
+    const formatNum = (n: number) => {
+      if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+      if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+      return String(n);
+    };
+    return (
+      <div className="right-panel" style={panelStyle}>
+        <h3>TOKEN USAGE</h3>
+        {!usage || usage.agents.length === 0 ? (
+          <div className="empty">No token usage data yet. Usage is tracked when agents call the Anthropic proxy.</div>
+        ) : (
+          <div className="token-usage-panel">
+            <div className="usage-totals">
+              <div className="usage-stat">
+                <span className="stat-label">Total Tokens</span>
+                <span className="stat-value">{formatNum(usage.totals.totalTokens)}</span>
+              </div>
+              <div className="usage-stat">
+                <span className="stat-label">Requests</span>
+                <span className="stat-value">{formatNum(usage.totals.totalRequests)}</span>
+              </div>
+              <div className="usage-stat">
+                <span className="stat-label">Input</span>
+                <span className="stat-value">{formatNum(usage.totals.inputTokens)}</span>
+              </div>
+              <div className="usage-stat">
+                <span className="stat-label">Output</span>
+                <span className="stat-value">{formatNum(usage.totals.outputTokens)}</span>
+              </div>
+            </div>
+            <div className="usage-agents">
+              {usage.agents.map(agent => {
+                const pct = usage.totals.totalTokens > 0 ? (agent.totalTokens / usage.totals.totalTokens) * 100 : 0;
+                return (
+                  <div key={agent.agent} className="usage-agent-row">
+                    <div className="usage-agent-header">
+                      <span className="usage-agent-name">{agent.agent}</span>
+                      <span className="usage-agent-total">{formatNum(agent.totalTokens)}</span>
+                    </div>
+                    <div className="usage-bar-container">
+                      <div className="usage-bar" style={{ width: `${Math.max(pct, 1)}%` }}>
+                        <div className="usage-bar-input" style={{ width: `${agent.totalInputTokens / agent.totalTokens * 100}%` }} />
+                      </div>
+                    </div>
+                    <div className="usage-agent-detail">
+                      <span>{formatNum(agent.totalInputTokens)} in</span>
+                      <span>{formatNum(agent.totalOutputTokens)} out</span>
+                      <span>{agent.totalRequests} req</span>
+                    </div>
+                    {agent.models.length > 1 && (
+                      <div className="usage-models">
+                        {agent.models.map(m => (
+                          <div key={m.model} className="usage-model-row">
+                            <span className="model-name">{m.model}</span>
+                            <span className="model-tokens">{formatNum(m.totalTokens)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
