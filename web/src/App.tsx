@@ -958,13 +958,15 @@ function MessageContent({ content }: { content: string }) {
       const btn = document.createElement('button');
       btn.className = 'code-copy-btn';
       btn.textContent = 'Copy';
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const code = pre.querySelector('code');
-        const text = code?.textContent || pre.textContent || '';
+        const text = code?.innerText || pre.innerText || '';
         navigator.clipboard.writeText(text);
         btn.textContent = 'Copied!';
         setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
       });
+      pre.style.position = 'relative';
       pre.appendChild(btn);
     });
   }, [displayText]);
