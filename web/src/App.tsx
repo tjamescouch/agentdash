@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useReducer, useCallback, createContext, FormEvent, useMemo } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { getOrCreateIdentity } from './crypto';
 
 // ============ Markdown ============
 
@@ -538,22 +539,31 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
     function connect() {
       dispatch({ type: 'CONNECTING' });
       ws.current = new WebSocket(wsUrl);
-
       ws.current.onopen = () => {
         console.log('WebSocket connected');
         reconnectDelay = 2000; // reset on success
         const savedMode = localStorage.getItem('dashboardMode');
+        
+        // Always ensure identity exists before connecting in participate mode
         if (savedMode && savedMode !== 'lurk') {
           const storedNick = localStorage.getItem('dashboardNick');
-          const storedIdentity = localStorage.getItem('dashboardIdentity');
-          ws.current!.send(JSON.stringify({
-            type: 'set_mode',
-            data: {
-              mode: savedMode,
-              nick: storedNick || undefined,
-              identity: storedIdentity ? JSON.parse(storedIdentity) : undefined
+          
+          getOrCreateIdentity().then(identity => {
+            if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+              ws.current.send(JSON.stringify({
+                type: 'set_mode',
+                data: {
+                  mode: savedMode,
+                  nick: storedNick || undefined,
+                  identity
+                }
+              }));
             }
-          }));
+          }).catch(err => {
+            console.error('Failed to generate identity:', err);
+            // Fall back to lurk mode if crypto fails
+            localStorage.setItem('dashboardMode', 'lurk');
+          });
         }
       };
 
@@ -804,14 +814,20 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
           className={`mode-btn ${state.mode}`}
           onClick={() => {
             const newMode = state.mode === 'lurk' ? 'participate' : 'lurk';
-            const storedIdentity = typeof window !== 'undefined' ? localStorage.getItem('dashboardIdentity') : null;
-            send({
-              type: 'set_mode',
-              data: {
-                mode: newMode,
-                ...(newMode === 'participate' && storedIdentity ? { identity: JSON.parse(storedIdentity) } : {})
-              }
-            });
+            
+            if (newMode === 'participate') {
+              getOrCreateIdentity().then(identity => {
+                send({
+                  type: 'set_mode',
+                  data: { mode: newMode, identity }
+                });
+              });
+            } else {
+              send({
+                type: 'set_mode',
+                data: { mode: newMode }
+              });
+            }
           }}
         >
           {state.mode === 'lurk' ? 'LURK' : 'PARTICIPATE'}
