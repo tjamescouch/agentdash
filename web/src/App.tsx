@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useReducer, useCallback, createContext, FormEvent, useMemo } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
+import { getOrCreateIdentity, saveIdentity } from '@agentchat/identity';
 
 // ============ Markdown ============
 
@@ -468,10 +469,7 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
       if (typeof window !== 'undefined') {
         localStorage.setItem('dashboardNick', agent.nick);
         if (action.data.publicKey && action.data.secretKey) {
-          localStorage.setItem('dashboardIdentity', JSON.stringify({
-            publicKey: action.data.publicKey,
-            secretKey: action.data.secretKey
-          }));
+          saveIdentity({ publicKey: action.data.publicKey, secretKey: action.data.secretKey });
         }
       }
       return { ...state, dashboardAgent: agent };
@@ -539,19 +537,19 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
       dispatch({ type: 'CONNECTING' });
       ws.current = new WebSocket(wsUrl);
 
-      ws.current.onopen = () => {
+      ws.current.onopen = async () => {
         console.log('WebSocket connected');
         reconnectDelay = 2000; // reset on success
         const savedMode = localStorage.getItem('dashboardMode');
         if (savedMode && savedMode !== 'lurk') {
           const storedNick = localStorage.getItem('dashboardNick');
-          const storedIdentity = localStorage.getItem('dashboardIdentity');
+          const identity = await getOrCreateIdentity();
           ws.current!.send(JSON.stringify({
             type: 'set_mode',
             data: {
               mode: savedMode,
               nick: storedNick || undefined,
-              identity: storedIdentity ? JSON.parse(storedIdentity) : undefined
+              identity: identity || undefined
             }
           }));
         }
@@ -802,14 +800,14 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
         </button>
         <button
           className={`mode-btn ${state.mode}`}
-          onClick={() => {
+          onClick={async () => {
             const newMode = state.mode === 'lurk' ? 'participate' : 'lurk';
-            const storedIdentity = typeof window !== 'undefined' ? localStorage.getItem('dashboardIdentity') : null;
+            const identity = newMode === 'participate' ? await getOrCreateIdentity() : null;
             send({
               type: 'set_mode',
               data: {
                 mode: newMode,
-                ...(newMode === 'participate' && storedIdentity ? { identity: JSON.parse(storedIdentity) } : {})
+                ...(identity ? { identity } : {})
               }
             });
           }}
@@ -927,15 +925,53 @@ function truncateAtWord(text: string, limit: number): string {
   return text.slice(0, boundary > 0 ? boundary : limit);
 }
 
+function MsgCopyBtn({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="msg-copy-btn"
+      title="Copy message"
+      onClick={() => {
+        navigator.clipboard.writeText(content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? '✓' : '⎘'}
+    </button>
+  );
+}
+
 function MessageContent({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false);
+  const contentRef = useRef<HTMLSpanElement>(null);
   const needsTruncation = content.length > MSG_TRUNCATE_LENGTH;
   const displayText = needsTruncation && !expanded
     ? truncateAtWord(content, MSG_TRUNCATE_LENGTH) + '...'
     : content;
+
+  useEffect(() => {
+    if (!contentRef.current) return;
+    const pres = contentRef.current.querySelectorAll('pre');
+    pres.forEach(pre => {
+      if (pre.querySelector('.code-copy-btn')) return;
+      const btn = document.createElement('button');
+      btn.className = 'code-copy-btn';
+      btn.textContent = 'Copy';
+      btn.addEventListener('click', () => {
+        const code = pre.querySelector('code');
+        const text = code?.textContent || pre.textContent || '';
+        navigator.clipboard.writeText(text);
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+      });
+      pre.appendChild(btn);
+    });
+  }, [displayText]);
+
   return (
     <span className="content">
-      <span dangerouslySetInnerHTML={{ __html: renderMarkdown(displayText) }} />
+      <span ref={contentRef} dangerouslySetInnerHTML={{ __html: renderMarkdown(displayText) }} />
       {needsTruncation && (
         <button
           className="expand-btn"
@@ -1059,6 +1095,7 @@ function MessageFeed({ state, dispatch, send }: { state: DashboardState; dispatc
                 ? <span className="verified-badge">&#x2713;</span>
                 : state.agents[msg.from] && <span className="unverified-badge">&#x26A0;</span>
               }
+              <MsgCopyBtn content={msg.content} />
               {fileData ? (
                 <span className="file-bubble">
                   <span className="file-icon">&#x1F4CE;</span>
