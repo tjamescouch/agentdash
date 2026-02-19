@@ -81,6 +81,40 @@ const AGENTCHAT_URL = resolveAgentChatUrl();
 const PORT = Number(process.env.PORT) || 3000;
 const AGENT_NAMES_FILE = 'agent-names.json';
 
+// ============ Spend / Token Analytics (from proxy logs) ============
+const spendStats: SpendStats = {
+  totalCalls: 0,
+  totalInputTokens: 0,
+  totalOutputTokens: 0,
+  totalTokens: 0,
+  byAgent: {},
+  byModel: {},
+};
+
+function ensureBucket<T extends Record<string, any>>(obj: T, key: string, init: () => any) {
+  if (!obj[key]) obj[key] = init();
+  return obj[key];
+}
+
+function recordTokenUsage(agentName: string, model: string, inputTokens: number, outputTokens: number) {
+  spendStats.totalCalls += 1;
+  spendStats.totalInputTokens += inputTokens;
+  spendStats.totalOutputTokens += outputTokens;
+  spendStats.totalTokens += inputTokens + outputTokens;
+
+  const a = ensureBucket(spendStats.byAgent, agentName, () => ({ calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }));
+  a.calls += 1;
+  a.inputTokens += inputTokens;
+  a.outputTokens += outputTokens;
+  a.totalTokens += inputTokens + outputTokens;
+
+  const m = ensureBucket(spendStats.byModel, model, () => ({ calls: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0 }));
+  m.calls += 1;
+  m.inputTokens += inputTokens;
+  m.outputTokens += outputTokens;
+  m.totalTokens += inputTokens + outputTokens;
+}
+
 // ============ Types ============
 
 interface Identity {
@@ -105,6 +139,15 @@ interface ChannelState {
   members: Set<string>;
   agentCount: number;
   messages: CircularBuffer<ChatMessage>;
+}
+
+interface SpendStats {
+  totalCalls: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  byAgent: Record<string, { calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
+  byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
 }
 
 interface ChatMessage {
@@ -1571,6 +1614,9 @@ function getChannelsSnapshot(): Array<{ name: string; members: string[]; message
 
 function handleDashboardMessage(client: DashboardClient, msg: DashboardMessage): void {
   switch (msg.type) {
+    case 'get_spend':
+      client.ws.send(JSON.stringify({ type: 'spend', data: spendStats }));
+      break;
     case 'send_message':
       if (client.mode === 'lurk') {
         client.ws.send(JSON.stringify({ type: 'error', data: { code: 'LURK_MODE', message: 'Cannot send in lurk mode' } }));
@@ -2177,6 +2223,7 @@ app.all('/proxy/:agentName/*', async (req: Request, res: Response) => {
       const total = inputTokens + outputTokens;
       if (inputTokens || outputTokens) {
         console.log(`[TOKEN] ${agentName} called ${model}: ${inputTokens} input + ${outputTokens} output = ${total} total tokens`);
+        recordTokenUsage(agentName, model, inputTokens, outputTokens);
       }
     } else {
       // Non-streaming: buffer full response
@@ -2190,6 +2237,7 @@ app.all('/proxy/:agentName/*', async (req: Request, res: Response) => {
           const { input_tokens = 0, output_tokens = 0 } = respJson.usage;
           const total = input_tokens + output_tokens;
           console.log(`[TOKEN] ${agentName} called ${model}: ${input_tokens} input + ${output_tokens} output = ${total} total tokens`);
+          recordTokenUsage(agentName, model, input_tokens, output_tokens);
         }
       } catch { /* not JSON */ }
     }
