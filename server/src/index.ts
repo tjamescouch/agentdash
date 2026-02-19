@@ -89,14 +89,40 @@ const spendStats: SpendStats = {
   totalTokens: 0,
   byAgent: {},
   byModel: {},
+  buckets1m: [],
 };
 
-function ensureBucket<T extends Record<string, any>>(obj: T, key: string, init: () => any) {
-  if (!obj[key]) obj[key] = init();
-  return obj[key];
+const BUCKET_MS = 60_000;
+const BUCKET_RETENTION = 24 * 60; // last 24h at 1m resolution
+
+function floorToBucket(ts: number): number {
+  return Math.floor(ts / BUCKET_MS) * BUCKET_MS;
+}
+
+function recordBucket(ts: number, inputTokens: number, outputTokens: number) {
+  const t = floorToBucket(ts);
+  const buckets = spendStats.buckets1m!;
+  const last = buckets[buckets.length - 1];
+  if (!last || last.t !== t) {
+    buckets.push({ t, inputTokens: 0, outputTokens: 0, totalTokens: 0, calls: 0 });
+  }
+  const b = buckets[buckets.length - 1];
+  b.calls += 1;
+  b.inputTokens += inputTokens;
+  b.outputTokens += outputTokens;
+  b.totalTokens += inputTokens + outputTokens;
+
+  if (buckets.length > BUCKET_RETENTION) buckets.splice(0, buckets.length - BUCKET_RETENTION);
+}
+
+function ensureBucket<T extends Record<string, any>, V>(obj: T, key: string, init: () => V): V {
+  const o = obj as Record<string, V>;
+  if (!o[key]) o[key] = init();
+  return o[key];
 }
 
 function recordTokenUsage(agentName: string, model: string, inputTokens: number, outputTokens: number) {
+  recordBucket(Date.now(), inputTokens, outputTokens);
   spendStats.totalCalls += 1;
   spendStats.totalInputTokens += inputTokens;
   spendStats.totalOutputTokens += outputTokens;
@@ -148,6 +174,7 @@ interface SpendStats {
   totalTokens: number;
   byAgent: Record<string, { calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
   byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
+  buckets1m?: Array<{ t: number; inputTokens: number; outputTokens: number; totalTokens: number; calls: number }>;
 }
 
 interface ChatMessage {

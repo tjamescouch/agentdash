@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useReducer, useCallback, createContext, Fo
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { getOrCreateIdentity, saveIdentity } from './identity';
+import { SpendGraphs } from './components/SpendGraphs';
 
 // ============ Markdown ============
 
@@ -43,6 +44,7 @@ function SpendPanel({ state, dispatch, send }: { state: DashboardState; dispatch
       </div>
 
       <div className="logs-body">
+        <SpendGraphs buckets={spend.buckets1m || []} />
         <div className="log-line">
           <span className="log-ts">Total</span>
           <span className="log-msg">
@@ -202,6 +204,7 @@ interface SpendStats {
   totalTokens: number;
   byAgent: Record<string, { calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
   byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
+  buckets1m?: Array<{ t: number; inputTokens: number; outputTokens: number; totalTokens: number; calls: number }>;
 }
 
 interface DashboardState {
