@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useReducer, useCallback, createContext, FormEvent, useMemo } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { getOrCreateIdentity, saveIdentity } from '@agentchat/identity';
+import { getOrCreateIdentity, saveIdentity } from './identity';
 
 // ============ Markdown ============
 
