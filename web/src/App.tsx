@@ -13,6 +13,63 @@ function renderMarkdown(content: string): string {
   return DOMPurify.sanitize(html);
 }
 
+function SpendPanel({ state, dispatch, send }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; send: WsSendFn }) {
+  const spend = state.spend;
+
+  useEffect(() => {
+    if (!state.spendOpen) return;
+    // refresh on open
+    send({ type: 'get_spend', data: {} });
+  }, [state.spendOpen, send]);
+
+  if (!state.spendOpen) return null;
+
+  const topAgents = Object.entries(spend.byAgent)
+    .sort((a, b) => (b[1].totalTokens || 0) - (a[1].totalTokens || 0))
+    .slice(0, 20);
+
+  const topModels = Object.entries(spend.byModel)
+    .sort((a, b) => (b[1].totalTokens || 0) - (a[1].totalTokens || 0))
+    .slice(0, 20);
+
+  return (
+    <div className="logs-panel">
+      <div className="logs-header">
+        <span className="logs-title">SPEND / TOKENS</span>
+        <div className="logs-actions">
+          <button onClick={() => send({ type: 'get_spend', data: {} })}>Refresh</button>
+          <button onClick={() => dispatch({ type: 'TOGGLE_SPEND' })}>Close</button>
+        </div>
+      </div>
+
+      <div className="logs-body">
+        <div className="log-line">
+          <span className="log-ts">Total</span>
+          <span className="log-msg">
+            {spend.totalCalls} calls • {spend.totalTokens} tokens ({spend.totalInputTokens} in / {spend.totalOutputTokens} out)
+          </span>
+        </div>
+
+        <div className="log-line"><span className="log-ts">By agent</span><span className="log-msg" /></div>
+        {topAgents.map(([agent, s]) => (
+          <div key={agent} className="log-line">
+            <span className="log-ts">{agent}</span>
+            <span className="log-msg">{s.calls} calls • {s.totalTokens} tokens ({s.inputTokens} in / {s.outputTokens} out)</span>
+          </div>
+        ))}
+
+        <div className="log-line"><span className="log-ts">By model</span><span className="log-msg" /></div>
+        {topModels.map(([model, s]) => (
+          <div key={model} className="log-line">
+            <span className="log-ts">{model}</span>
+            <span className="log-msg">{s.calls} calls • {s.totalTokens} tokens ({s.inputTokens} in / {s.outputTokens} out)</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ============ Types ============
 
 interface Agent {
@@ -138,6 +195,15 @@ interface LogEntry {
   msg: string;
 }
 
+interface SpendStats {
+  totalCalls: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  byAgent: Record<string, { calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
+  byModel: Record<string, { calls: number; inputTokens: number; outputTokens: number; totalTokens: number }>;
+}
+
 interface DashboardState {
   connected: boolean;
   connectionStatus: 'connecting' | 'syncing' | 'ready' | 'error' | 'disconnected';
@@ -162,6 +228,8 @@ interface DashboardState {
   saveModal: { transferId: string; files: { name: string; size: number }[] } | null;
   logs: LogEntry[];
   logsOpen: boolean;
+  spend: SpendStats;
+  spendOpen: boolean;
   pulseOpen: boolean;
   killSwitchOpen: boolean;
   lockdown: boolean;
@@ -191,6 +259,8 @@ type DashboardAction =
   | { type: 'HIDE_SAVE_MODAL' }
   | { type: 'LOG'; data: LogEntry }
   | { type: 'LOG_HISTORY'; data: LogEntry[] }
+  | { type: 'SPEND'; data: SpendStats }
+  | { type: 'TOGGLE_SPEND' }
   | { type: 'TOGGLE_LOGS' }
   | { type: 'CLEAR_LOGS' }
   | { type: 'TOGGLE_PULSE' }
@@ -303,6 +373,8 @@ const initialState: DashboardState = {
   saveModal: null,
   logs: [],
   logsOpen: false,
+  spend: { totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0, byAgent: {}, byModel: {} },
+  spendOpen: false,
   pulseOpen: false,
   killSwitchOpen: false,
   lockdown: false,
@@ -448,6 +520,10 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
       return { ...state, logsOpen: !state.logsOpen };
     case 'CLEAR_LOGS':
       return { ...state, logs: [] };
+    case 'SPEND':
+      return { ...state, spend: action.data };
+    case 'TOGGLE_SPEND':
+      return { ...state, spendOpen: !state.spendOpen };
     case 'TOGGLE_PULSE':
       return { ...state, pulseOpen: !state.pulseOpen };
     case 'CONNECTION_ERROR':
@@ -684,6 +760,9 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
           case 'log_history':
             dispatch({ type: 'LOG_HISTORY', data: msg.data });
             break;
+          case 'spend':
+            dispatch({ type: 'SPEND', data: msg.data });
+            break;
           case 'lockdown':
             dispatch({ type: 'LOCKDOWN' });
             break;
@@ -797,6 +876,18 @@ function TopBar({ state, dispatch, send }: { state: DashboardState; dispatch: Re
           onClick={() => dispatch({ type: 'TOGGLE_PULSE' })}
         >
           PULSE
+        </button>
+        <button
+          className={`logs-btn ${state.spendOpen ? 'active' : ''}`}
+          onClick={() => {
+            // Request latest spend stats on open
+            const next = !state.spendOpen;
+            dispatch({ type: 'TOGGLE_SPEND' });
+            if (next) send({ type: 'get_spend', data: {} });
+          }}
+          title="Token usage / spend analytics (from proxy logs)"
+        >
+          SPEND
         </button>
         <button
           className={`mode-btn ${state.mode}`}
@@ -2859,6 +2950,14 @@ export default function App() {
                   <div className="resize-handle-h" ref={logsPanel.handleRef} onMouseDown={logsPanel.onMouseDown} />
                   <div style={{ height: logsPanel.width }}>
                     <LogsPanel state={state} dispatch={dispatch} />
+                  </div>
+                </>
+              )}
+              {state.spendOpen && (
+                <>
+                  <div className="resize-handle-h" ref={logsPanel.handleRef} onMouseDown={logsPanel.onMouseDown} />
+                  <div style={{ height: logsPanel.width }}>
+                    <SpendPanel state={state} dispatch={dispatch} send={send} />
                   </div>
                 </>
               )}
