@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import multer from 'multer';
 import nacl from 'tweetnacl';
 import tweetnaclUtil from 'tweetnacl-util';
+import { parseSpendMessage } from './spend-parser.js';
 
 const { encodeBase64, decodeBase64 } = tweetnaclUtil;
 
@@ -2037,6 +2038,31 @@ app.post('/api/agent/start', express.json({ limit: '1kb' }), (req: Request, res:
     res.json({ status: 'ok', message: 'Observer already connected. Individual agents must be started from their host machines.' });
   }
 });
+
+// Insert after line 2039 (after the agent/start endpoint, before "// File upload endpoint")
+
+// Real-time spend reporting endpoint for gro agents
+app.post('/api/spend/report', express.json({ limit: '10kb' }), (req: Request, res: Response) => {
+  const { agentName, model, inputTokens, outputTokens, timestamp } = req.body || {};
+
+  if (!agentName || !model || typeof inputTokens !== 'number' || typeof outputTokens !== 'number') {
+    return res.status(400).json({ error: 'Missing required fields: agentName, model, inputTokens, outputTokens' });
+  }
+
+  // Record in local stats
+  recordTokenUsage(agentName, model, inputTokens, outputTokens);
+
+  // Broadcast updated spend stats to all dashboard clients
+  broadcastToDashboards({
+    type: 'spend_update',
+    data: spendStats
+  });
+
+  console.log(`[SPEND] ${agentName} (${model}): +${inputTokens} in / +${outputTokens} out`);
+
+  res.json({ status: 'ok', totalCalls: spendStats.totalCalls, totalTokens: spendStats.totalTokens });
+});
+
 
 // File upload endpoint
 const upload = multer({
