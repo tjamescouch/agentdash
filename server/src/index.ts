@@ -1966,7 +1966,8 @@ app.post('/api/killswitch', express.json({ limit: '1kb' }), (req: Request, res: 
 
 
 // ============ Agent Control Endpoints ============
-const AGENT_CONTROL_PASSPHRASE = process.env.AGENT_CONTROL_PASSPHRASE || '';
+// Store SHA-256 hash of passphrase in env: echo -n "yourpassphrase" | sha256sum
+const AGENT_CONTROL_HASH = process.env.AGENT_CONTROL_HASH || '';
 const agentControlAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
 function validatePassphrase(clientIp: string, passphrase: string, res: Response): boolean {
@@ -1980,8 +1981,8 @@ function validatePassphrase(clientIp: string, passphrase: string, res: Response)
     agentControlAttempts.delete(clientIp);
   }
 
-  if (!AGENT_CONTROL_PASSPHRASE) {
-    res.status(503).json({ error: 'Agent control not configured. Set AGENT_CONTROL_PASSPHRASE env var.' });
+  if (!AGENT_CONTROL_HASH) {
+    res.status(503).json({ error: 'Agent control not configured. Set AGENT_CONTROL_HASH env var (SHA-256 of passphrase).' });
     return false;
   }
 
@@ -1990,9 +1991,11 @@ function validatePassphrase(clientIp: string, passphrase: string, res: Response)
     return false;
   }
 
-  const phraseBuf = Buffer.from(passphrase);
-  const correctBuf = Buffer.from(AGENT_CONTROL_PASSPHRASE);
-  if (phraseBuf.length !== correctBuf.length || !crypto.timingSafeEqual(phraseBuf, correctBuf)) {
+  // Hash the input and compare to stored hash
+  const inputHash = crypto.createHash('sha256').update(passphrase).digest('hex');
+  const storedHash = AGENT_CONTROL_HASH.toLowerCase().trim();
+  
+  if (inputHash !== storedHash) {
     console.warn(`[AGENT_CONTROL] Failed passphrase attempt from ${clientIp}`);
     const current = agentControlAttempts.get(clientIp) || { count: 0, lastAttempt: 0 };
     agentControlAttempts.set(clientIp, { count: current.count + 1, lastAttempt: Date.now() });
@@ -2051,21 +2054,34 @@ app.post('/api/agent/stop', express.json({ limit: '1kb' }), (req: Request, res: 
   res.json({ status: 'ok', message: `Agent ${agent.nick || agentId} stop signal sent` });
 });
 
-app.post('/api/agent/start', express.json({ limit: '1kb' }), (req: Request, res: Response) => {
+app.post('/api/agent/start', express.json({ limit: '2kb' }), (req: Request, res: Response) => {
   const clientIp = req.ip || 'unknown';
-  const { passphrase } = req.body || {};
+  const { passphrase, model, runtime } = req.body || {};
 
   if (!validatePassphrase(clientIp, passphrase, res)) return;
 
-  console.warn(`[AGENT_CONTROL] Start/reconnect requested from ${clientIp}`);
+  console.warn(`[AGENT_CONTROL] Start requested from ${clientIp} — model: ${model || 'default'}, runtime: ${runtime || 'default'}`);
 
   // Reconnect the main observer connection if disconnected
   if (!agentChatWs || agentChatWs.readyState !== WebSocket.OPEN) {
     connectToAgentChat(identity!);
-    res.json({ status: 'ok', message: 'Reconnecting observer to AgentChat server...' });
-  } else {
-    res.json({ status: 'ok', message: 'Observer already connected. Individual agents must be started from their host machines.' });
   }
+
+  // Broadcast start request to dashboards (the actual agent spawning is handled by the host)
+  broadcastToDashboards({
+    type: 'agent_start_request',
+    data: {
+      model: model || 'claude-sonnet-4-20250514',
+      runtime: runtime || 'claude-code',
+      requestedBy: clientIp,
+      ts: Date.now()
+    }
+  });
+
+  res.json({
+    status: 'ok',
+    message: `Agent start signal broadcast — model: ${model || 'claude-sonnet-4-20250514'}, runtime: ${runtime || 'claude-code'}`
+  });
 });
 
 // Insert after line 2039 (after the agent/start endpoint, before "// File upload endpoint")
