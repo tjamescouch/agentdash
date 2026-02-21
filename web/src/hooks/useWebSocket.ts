@@ -55,9 +55,11 @@ export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendF
           }
           case 'connected':
             dispatch({ type: 'CONNECTED', data: msg.data });
+            dispatch({ type: 'ADD_TOAST', toast: { message: 'Connected to AgentChat', type: 'success', duration: 3000 } });
             break;
           case 'disconnected':
             dispatch({ type: 'DISCONNECTED' });
+            dispatch({ type: 'ADD_TOAST', toast: { message: 'Disconnected from server', type: 'warning', duration: 5000 } });
             break;
           case 'message':
             dispatch({ type: 'MESSAGE', data: msg.data });
@@ -145,6 +147,7 @@ export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendF
                 peerNick: ''
               }
             });
+            dispatch({ type: 'ADD_TOAST', toast: { message: `File transfer complete: ${msg.data.files?.length || 0} file(s)`, type: 'success', duration: 4000 } });
             break;
           case 'transfer_update':
           case 'offer_sent':
@@ -164,13 +167,18 @@ export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendF
             break;
           case 'lockdown':
             dispatch({ type: 'LOCKDOWN' });
+            dispatch({ type: 'ADD_TOAST', toast: { message: 'LOCKDOWN ACTIVATED', type: 'error', duration: 0 } });
             break;
           case 'error':
             console.error('Server error:', msg.data?.code, msg.data?.message);
             if (msg.data?.code === 'LURK_MODE') {
               dispatch({ type: 'SET_MODE', mode: 'lurk' });
+              dispatch({ type: 'ADD_TOAST', toast: { message: 'Switched to lurk mode', type: 'info', duration: 3000 } });
             } else if (msg.data?.code === 'NOT_ALLOWED') {
               dispatch({ type: 'CONNECTION_ERROR', error: msg.data?.message || 'Connection rejected by server' });
+              dispatch({ type: 'ADD_TOAST', toast: { message: msg.data?.message || 'Connection rejected', type: 'error', duration: 6000 } });
+            } else {
+              dispatch({ type: 'ADD_TOAST', toast: { message: msg.data?.message || 'Server error', type: 'error', duration: 5000 } });
             }
             break;
         }
