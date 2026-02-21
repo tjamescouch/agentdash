@@ -1,21 +1,12 @@
 import { useState, FormEvent } from 'react';
 import type { DashboardState, DashboardAction, WsSendFn } from '../types';
 import { agentColor, safeUrl, formatTime } from '../utils';
-import { GeoMap } from './GeoMap';
 
 export function RightPanel({ state, dispatch, send, panelWidth }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; send: WsSendFn; panelWidth: number }) {
   const panelStyle = { width: panelWidth };
   const [renameValue, setRenameValue] = useState('');
   const [isRenaming, setIsRenaming] = useState(false);
   const [skillsFilter, setSkillsFilter] = useState('');
-
-  if (state.rightPanel === 'geomap') {
-    return (
-      <div className="right-panel" style={panelStyle}>
-        <GeoMap />
-      </div>
-    );
-  }
 
   if (state.rightPanel === 'leaderboard') {
     return (
