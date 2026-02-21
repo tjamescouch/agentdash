@@ -1,4 +1,5 @@
 import { useReducer, useState, useCallback, useEffect } from 'react';
+import type { Toast, DashboardState as DashboardStateType, DashboardAction as DashboardActionType } from './types';
 import { DashboardContext } from './context';
 import { reducer, initialState } from './reducer';
 import { useWebSocket } from './hooks/useWebSocket';
@@ -16,6 +17,54 @@ import { BootSequence } from './components/BootSequence';
 import { DropZone, SendFileModal, SaveModal } from './components/FileTransfer';
 import { KillSwitchModal } from './components/modals/KillSwitchModal';
 import { AgentControlModal } from './components/modals/AgentControlModal';
+
+
+// ============ Toast Notifications ============
+
+function ToastContainer({ state, dispatch }: { state: DashboardStateType; dispatch: React.Dispatch<DashboardActionType> }) {
+  // Auto-dismiss toasts
+  useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    state.toasts.forEach(toast => {
+      if (toast.duration > 0) {
+        const remaining = toast.duration - (Date.now() - toast.ts);
+        if (remaining <= 0) {
+          dispatch({ type: 'DISMISS_TOAST', id: toast.id });
+        } else {
+          timers.push(setTimeout(() => {
+            dispatch({ type: 'DISMISS_TOAST', id: toast.id });
+          }, remaining));
+        }
+      }
+    });
+    return () => timers.forEach(clearTimeout);
+  }, [state.toasts, dispatch]);
+
+  if (state.toasts.length === 0) return null;
+
+  const iconMap: Record<Toast['type'], string> = {
+    info: '\u2139',
+    success: '\u2713',
+    warning: '\u26A0',
+    error: '\u2717'
+  };
+
+  return (
+    <div className="toast-container">
+      {state.toasts.map(toast => (
+        <div
+          key={toast.id}
+          className={`toast toast-${toast.type}`}
+          onClick={() => dispatch({ type: 'DISMISS_TOAST', id: toast.id })}
+        >
+          <span className="toast-icon">{iconMap[toast.type]}</span>
+          <span className="toast-message">{toast.message}</span>
+          <button className="toast-close">&times;</button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -190,6 +239,7 @@ export default function App() {
             <AgentControlModal state={state} dispatch={dispatch} send={send} />
             <LockdownOverlay state={state} />
             <ConnectionOverlay state={state} />
+            <ToastContainer state={state} dispatch={dispatch} />
           </div>
         </div>
         <div className="vm-statusbar">

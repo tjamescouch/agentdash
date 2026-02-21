@@ -3244,3 +3244,128 @@ button, .list-item, .channel-tag, .mode-btn, .logs-btn, .pulse-btn {
   color: var(--text-secondary);
   border-color: var(--text-muted);
 }
+
+/* ============ Toast Notifications ============ */
+
+.toast-container {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 99998;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 380px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  pointer-events: auto;
+  animation: toast-slide-in 0.25s ease-out;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.toast:hover {
+  opacity: 0.9;
+  transform: translateX(-2px);
+}
+
+@keyframes toast-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(40px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.toast-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.toast-message {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.toast-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.toast-close:hover {
+  color: var(--text-primary);
+}
+
+/* Toast type variants */
+.toast-info {
+  border-left: 3px solid var(--accent-blue);
+}
+
+.toast-info .toast-icon {
+  color: var(--accent-blue);
+  background: rgba(0, 191, 255, 0.15);
+}
+
+.toast-success {
+  border-left: 3px solid var(--text-primary);
+}
+
+.toast-success .toast-icon {
+  color: var(--text-primary);
+  background: rgba(0, 255, 65, 0.15);
+}
+
+.toast-warning {
+  border-left: 3px solid var(--accent-yellow);
+}
+
+.toast-warning .toast-icon {
+  color: var(--accent-yellow);
+  background: rgba(255, 255, 0, 0.15);
+}
+
+.toast-error {
+  border-left: 3px solid var(--accent-red);
+}
+
+.toast-error .toast-icon {
+  color: var(--accent-red);
+  background: rgba(255, 68, 68, 0.15);
+}
+
+/* Mobile toast adjustments */
+@media (max-width: 768px) {
+  .toast-container {
+    top: 8px;
+    right: 8px;
+    left: 8px;
+    max-width: none;
+  }
+}

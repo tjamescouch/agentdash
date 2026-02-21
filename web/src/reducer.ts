@@ -1,4 +1,4 @@
-import type { DashboardState, DashboardAction, Message } from './types';
+import type { DashboardState, DashboardAction, Message, Toast } from './types';
 
 // ============ Persistence ============
 
@@ -81,7 +81,8 @@ export const initialState: DashboardState = {
   pulseOpen: false,
   killSwitchOpen: false,
   agentControlOpen: false,
-  lockdown: false
+  lockdown: false,
+  toasts: []
 };
 
 // ============ Reducer ============
@@ -241,6 +242,19 @@ export function reducer(state: DashboardState, action: DashboardAction): Dashboa
       return { ...state, agentControlOpen: !state.agentControlOpen };
     case 'LOCKDOWN':
       return { ...state, lockdown: true, killSwitchOpen: false };
+    case 'ADD_TOAST': {
+      const toast: Toast = {
+        ...action.toast,
+        id: `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        ts: Date.now()
+      };
+      // Keep max 5 toasts visible
+      const toasts = [...state.toasts, toast].slice(-5);
+      return { ...state, toasts };
+    }
+    case 'DISMISS_TOAST':
+      return { ...state, toasts: state.toasts.filter(t => t.id !== action.id) };
+
     case 'AGENTS_BULK_UPDATE':
       return { ...state, agents: Object.fromEntries(action.data.map(a => [a.id, a])) };
     case 'CHANNELS_BULK_UPDATE':

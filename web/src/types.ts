@@ -120,6 +120,15 @@ export interface LogEntry {
   msg: string;
 }
 
+
+export interface Toast {
+  id: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  ts: number;
+  duration: number; // ms, 0 = sticky
+}
+
 export interface SpendStats {
   totalCalls: number;
   totalInputTokens: number;
@@ -160,6 +169,7 @@ export interface DashboardState {
   killSwitchOpen: boolean;
   agentControlOpen: boolean;
   lockdown: boolean;
+  toasts: Toast[];
 }
 
 export type DashboardAction =
@@ -195,6 +205,8 @@ export type DashboardAction =
   | { type: 'TOGGLE_KILLSWITCH' }
   | { type: 'TOGGLE_AGENT_CONTROL' }
   | { type: 'LOCKDOWN' }
+  | { type: 'ADD_TOAST'; toast: Omit<Toast, 'id' | 'ts'> }
+  | { type: 'DISMISS_TOAST'; id: string }
   | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }
   | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] }
   | { type: 'SET_DASHBOARD_AGENT'; data: { agentId: string; nick: string; publicKey?: string; secretKey?: string } }
