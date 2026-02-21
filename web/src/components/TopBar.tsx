@@ -28,7 +28,13 @@ export function TopBar({ state, dispatch, send }: { state: DashboardState; dispa
         >
           KILL
         </button>
-        {/* PULSE button disabled per request */}
+        <button
+          className={`logs-btn ${state.logsOpen ? 'active' : ''}`}
+          onClick={() => dispatch({ type: 'TOGGLE_LOGS' })}
+          title="Server logs (Alt+L)"
+        >
+          LOGS
+        </button>
         <button
           className={`logs-btn ${state.spendOpen ? 'active' : ''}`}
           onClick={() => {

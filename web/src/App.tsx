@@ -8,7 +8,6 @@ import { TopBar } from './components/TopBar';
 import { Sidebar } from './components/Sidebar';
 import { MessageFeed } from './components/MessageFeed';
 import { RightPanel } from './components/RightPanel';
-import { NetworkPulse } from './components/NetworkPulse';
 import { LogsPanel } from './components/LogsPanel';
 import { SpendPanel } from './components/SpendPanel';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
@@ -97,13 +96,6 @@ export default function App() {
         return;
       }
 
-      // Alt+P: toggle network pulse
-      if (e.altKey && e.key.toLowerCase() === 'p') {
-        e.preventDefault();
-        dispatch({ type: 'TOGGLE_PULSE' });
-        return;
-      }
-
       // Alt+K: toggle kill switch
       if (e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
@@ -154,103 +146,43 @@ export default function App() {
 
   return (
     <DashboardContext.Provider value={{ state, dispatch, send }}>
-      <div className="vm-window">
-        <div className="vm-menubar">
-          <span className="vm-menu-item">File</span>
-          <span className="vm-menu-item">Edit</span>
-          <span className="vm-menu-item">VM</span>
-          <span className="vm-menu-item">View</span>
-          <span className="vm-menu-item">Help</span>
-          <div className="vm-menu-right">
-            AgentDash v2.1
-          </div>
-        </div>
-        <div className="vm-tabbar">
-          <div className="vm-tab">
-            <div className="vm-tab-icon">&#9654;</div>
-            <span className="vm-tab-label">AgentChat Network</span>
-            <span className={`vm-tab-status ${state.connected ? 'running' : 'stopped'}`}>
-              {state.connected ? 'Running' : 'Stopped'}
-            </span>
-          </div>
-        </div>
-        <div className="vm-toolbar">
-          <button className="vm-toolbar-btn" title="Power On" onClick={() => {}}>&#9211;</button>
-          <button className="vm-toolbar-btn" title="Suspend">&#9208;</button>
-          <div className="vm-toolbar-sep" />
-          <button className="vm-toolbar-btn" title="Snapshot">&#128247;</button>
-          <button className="vm-toolbar-btn" title="Settings">&#9881;</button>
-          <div className="vm-toolbar-sep" />
-          <button
-            className="vm-toolbar-btn active"
-            title="Agent Control"
-            onClick={() => dispatch({ type: 'TOGGLE_AGENT_CONTROL' })}
-          >&#128101;</button>
-          <span className="vm-toolbar-label">Agents: {Object.values(state.agents).filter(a => a.online).length}</span>
-          <div className="vm-toolbar-sep" />
-          <button
-            className="vm-toolbar-btn danger"
-            title="Kill Switch"
-            onClick={() => dispatch({ type: 'TOGGLE_KILLSWITCH' })}
-          >&#9940;</button>
-        </div>
-        <div className="vm-content">
-          <div className="dashboard">
-            <TopBar state={state} dispatch={dispatch} send={send} />
-            <div className="content-area">
-              <div className="main">
-                <Sidebar state={state} dispatch={dispatch} sidebarWidth={sidebar.width} send={send} />
-                <div className="resize-handle" ref={sidebar.handleRef} onMouseDown={sidebar.onMouseDown} />
-                {state.pulseOpen ? (
-                  <NetworkPulse state={state} dispatch={dispatch} />
-                ) : (
-                  <DropZone state={state} dispatch={dispatch}>
-                    <MessageFeed state={state} dispatch={dispatch} send={send} />
-                  </DropZone>
-                )}
-                <div className="resize-handle" ref={rightPanel.handleRef} onMouseDown={rightPanel.onMouseDown} />
-                <RightPanel state={state} dispatch={dispatch} send={send} panelWidth={rightPanel.width} />
-              </div>
-              {state.logsOpen && (
-                <>
-                  <div className="resize-handle-h" ref={logsPanel.handleRef} onMouseDown={logsPanel.onMouseDown} />
-                  <div style={{ height: logsPanel.width }}>
-                    <LogsPanel state={state} dispatch={dispatch} />
-                  </div>
-                </>
-              )}
-              {state.spendOpen && (
-                <>
-                  <div className="resize-handle-h" ref={logsPanel.handleRef} onMouseDown={logsPanel.onMouseDown} />
-                  <div style={{ height: logsPanel.width }}>
-                    <SpendPanel state={state} dispatch={dispatch} send={send} />
-                  </div>
-                </>
-              )}
+      <div className="app-shell">
+        <div className="dashboard">
+          <TopBar state={state} dispatch={dispatch} send={send} />
+          <div className="content-area">
+            <div className="main">
+              <Sidebar state={state} dispatch={dispatch} sidebarWidth={sidebar.width} send={send} />
+              <div className="resize-handle" ref={sidebar.handleRef} onMouseDown={sidebar.onMouseDown} />
+              <DropZone state={state} dispatch={dispatch}>
+                <MessageFeed state={state} dispatch={dispatch} send={send} />
+              </DropZone>
+              <div className="resize-handle" ref={rightPanel.handleRef} onMouseDown={rightPanel.onMouseDown} />
+              <RightPanel state={state} dispatch={dispatch} send={send} panelWidth={rightPanel.width} />
             </div>
-            <SendFileModal state={state} dispatch={dispatch} send={send} />
-            <SaveModal state={state} dispatch={dispatch} send={send} />
-            <KillSwitchModal state={state} dispatch={dispatch} />
-            <AgentControlModal state={state} dispatch={dispatch} send={send} />
-            <LockdownOverlay state={state} />
-            <ConnectionOverlay state={state} />
-            <ToastContainer state={state} dispatch={dispatch} />
+            {state.logsOpen && (
+              <>
+                <div className="resize-handle-h" ref={logsPanel.handleRef} onMouseDown={logsPanel.onMouseDown} />
+                <div style={{ height: logsPanel.width }}>
+                  <LogsPanel state={state} dispatch={dispatch} />
+                </div>
+              </>
+            )}
+            {state.spendOpen && (
+              <>
+                <div className="resize-handle-h" ref={logsPanel.handleRef} onMouseDown={logsPanel.onMouseDown} />
+                <div style={{ height: logsPanel.width }}>
+                  <SpendPanel state={state} dispatch={dispatch} send={send} />
+                </div>
+              </>
+            )}
           </div>
-        </div>
-        <div className="vm-statusbar">
-          <div className="vm-statusbar-item">
-            <div className={`vm-statusbar-dot ${state.connected ? 'green' : 'red'}`} />
-            {state.connected ? 'Connected' : 'Disconnected'}
-          </div>
-          <div className="vm-statusbar-item">
-            Agents: {Object.values(state.agents).filter(a => a.online).length}
-          </div>
-          <div className="vm-statusbar-item">
-            Channels: {Object.keys(state.channels).length}
-          </div>
-          <div className="vm-statusbar-right">
-            <span>ws://agentchat-server.fly.dev</span>
-          </div>
+          <SendFileModal state={state} dispatch={dispatch} send={send} />
+          <SaveModal state={state} dispatch={dispatch} send={send} />
+          <KillSwitchModal state={state} dispatch={dispatch} />
+          <AgentControlModal state={state} dispatch={dispatch} send={send} />
+          <LockdownOverlay state={state} />
+          <ConnectionOverlay state={state} />
+          <ToastContainer state={state} dispatch={dispatch} />
         </div>
       </div>
     </DashboardContext.Provider>

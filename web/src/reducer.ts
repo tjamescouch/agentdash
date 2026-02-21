@@ -78,7 +78,6 @@ export const initialState: DashboardState = {
   logsOpen: false,
   spend: { totalCalls: 0, totalInputTokens: 0, totalOutputTokens: 0, totalTokens: 0, byAgent: {}, byModel: {} },
   spendOpen: false,
-  pulseOpen: false,
   killSwitchOpen: false,
   agentControlOpen: false,
   lockdown: false,
@@ -229,8 +228,6 @@ export function reducer(state: DashboardState, action: DashboardAction): Dashboa
       return { ...state, logsOpen: !state.logsOpen };
     case 'CLEAR_LOGS':
       return { ...state, logs: [] };
-    case 'TOGGLE_PULSE':
-      return { ...state, pulseOpen: !state.pulseOpen };
     case 'CONNECTION_ERROR':
       return { ...state, connectionStatus: 'error', connectionError: action.error };
     case 'CONNECTING':
