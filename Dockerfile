@@ -10,6 +10,9 @@ RUN npm ci
 COPY server/package*.json ./server/
 RUN cd server && npm ci
 
+# Copy vendored packages (needed by web's file: dependency)
+COPY packages/ ./packages/
+
 # Install web deps
 COPY web/package*.json ./web/
 RUN cd web && npm ci
