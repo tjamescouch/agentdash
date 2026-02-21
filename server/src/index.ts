@@ -2396,10 +2396,13 @@ const RATE_LIMIT_WINDOW_MS = 10000;
 const RATE_LIMIT_MAX_MESSAGES = 50;
 const ipConnectionCounts = new Map<string, number>();
 
+// Only trust X-Forwarded-For when behind a known reverse proxy (e.g., Fly.io)
+const TRUST_PROXY = process.env.TRUST_PROXY === 'true' || isRunningInContainer();
+
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: MAX_WS_MESSAGE_SIZE });
 
 wss.on('connection', (ws, req) => {
-  const ip = req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+  const ip = (TRUST_PROXY && req.headers['x-forwarded-for']?.toString().split(',')[0]?.trim()) || req.socket.remoteAddress || 'unknown';
   const currentCount = ipConnectionCounts.get(ip) || 0;
 
   if (currentCount >= MAX_CONNECTIONS_PER_IP) {
