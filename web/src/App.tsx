@@ -13,7 +13,6 @@ import { LogsPanel } from './components/LogsPanel';
 import { SpendPanel } from './components/SpendPanel';
 import { ConnectionOverlay } from './components/ConnectionOverlay';
 import { LockdownOverlay } from './components/LockdownOverlay';
-import { BootSequence } from './components/BootSequence';
 import { DropZone, SendFileModal, SaveModal } from './components/FileTransfer';
 import { KillSwitchModal } from './components/modals/KillSwitchModal';
 import { AgentControlModal } from './components/modals/AgentControlModal';
@@ -72,9 +71,6 @@ export default function App() {
   const sidebar = useResizable(220, 160, 400, 'left');
   const rightPanel = useResizable(280, 200, 500, 'right');
   const logsPanel = useResizable(200, 80, 500, 'bottom');
-  const [booted, setBooted] = useState(() => sessionStorage.getItem('agentdash-booted') === '1');
-
-  const handleBootComplete = useCallback(() => setBooted(true), []);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -158,7 +154,6 @@ export default function App() {
 
   return (
     <DashboardContext.Provider value={{ state, dispatch, send }}>
-      {!booted && <BootSequence onComplete={handleBootComplete} />}
       <div className="vm-window">
         <div className="vm-menubar">
           <span className="vm-menu-item">File</span>
@@ -257,7 +252,6 @@ export default function App() {
             <span>ws://agentchat-server.fly.dev</span>
           </div>
         </div>
-        <div className="crt-overlay" />
       </div>
     </DashboardContext.Provider>
   );
