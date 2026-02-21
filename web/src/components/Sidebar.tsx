@@ -69,12 +69,14 @@ export function Sidebar({ state, dispatch, sidebarWidth, send }: { state: Dashbo
           <button type="submit" className="channel-join-btn" title="Join channel">+</button>
         </form>
         <div className="list">
-          {channels.map(channel => (
+          {channels.map((channel, idx) => (
             <div
               key={channel.name}
               className={`list-item ${state.selectedChannel === channel.name ? 'selected' : ''}`}
               onClick={() => dispatch({ type: 'SELECT_CHANNEL', channel: channel.name })}
+              title={idx < 9 ? `Alt+${idx + 1}` : undefined}
             >
+              {idx < 9 && <kbd className="shortcut-hint">{idx + 1}</kbd>}
               <span className="channel-name">{channel.name}</span>
               {state.activityCounts[channel.name] > 0 && (
                 <span className="activity-badge" title="Join/leave activity">{state.activityCounts[channel.name]}</span>

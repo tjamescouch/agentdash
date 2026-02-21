@@ -3095,3 +3095,29 @@ button, .list-item, .channel-tag, .mode-btn, .logs-btn, .pulse-btn {
   font-family: 'Segoe UI', -apple-system, sans-serif;
   font-weight: 600;
 }
+
+/* ============ Keyboard Shortcut Hints ============ */
+
+.shortcut-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  font-size: 9px;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.list-item:hover .shortcut-hint,
+.list-item.selected .shortcut-hint {
+  opacity: 0.8;
+  color: var(--text-secondary);
+  border-color: var(--text-muted);
+}
