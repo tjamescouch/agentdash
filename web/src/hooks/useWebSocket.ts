@@ -211,6 +211,17 @@ export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendF
       setSend(() => (msg: Record<string, unknown>) => {
         if (ws.current?.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify(msg));
+        } else {
+          console.warn('WebSocket not ready, buffering message');
+          // Wait for next tick and retry once
+          setTimeout(() => {
+            if (ws.current?.readyState === WebSocket.OPEN) {
+              ws.current.send(JSON.stringify(msg));
+            } else {
+              console.error('WebSocket still not ready after retry');
+              dispatch({ type: 'ADD_TOAST', toast: { message: 'Connection lost — message not sent', type: 'error', duration: 3000 } });
+            }
+          }, 100);
         }
       });
     }
