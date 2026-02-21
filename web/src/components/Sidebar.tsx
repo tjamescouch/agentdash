@@ -5,7 +5,9 @@ import { addSavedChannel } from '../reducer';
 
 export function Sidebar({ state, dispatch, sidebarWidth, send }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; sidebarWidth: number; send: WsSendFn }) {
   const [joinInput, setJoinInput] = useState('');
-  const agents = Object.values(state.agents).sort((a, b) => {
+  const agents = Object.values(state.agents)
+    .filter(a => !state.hideOfflineAgents || a.online)
+    .sort((a, b) => {
     if (a.online !== b.online) return b.online ? 1 : -1;
     return (a.nick || a.id).localeCompare(b.nick || b.id);
   });
@@ -34,7 +36,17 @@ export function Sidebar({ state, dispatch, sidebarWidth, send }: { state: Dashbo
   return (
     <div className="sidebar" style={{ width: sidebarWidth }}>
       <div className="section">
-        <h3>AGENTS ({agents.length})</h3>
+        <div className="sidebar-title-row">
+          <h3>AGENTS ({agents.length})</h3>
+          <label className="sidebar-toggle" title="Hide offline agents">
+            <input
+              type="checkbox"
+              checked={state.hideOfflineAgents}
+              onChange={(e) => dispatch({ type: 'SET_HIDE_OFFLINE_AGENTS', value: e.target.checked })}
+            />
+            Hide offline
+          </label>
+        </div>
         <div className="list">
           {agents.map(agent => (
             <div

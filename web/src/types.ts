@@ -169,6 +169,7 @@ export interface DashboardState {
   killSwitchOpen: boolean;
   agentControlOpen: boolean;
   lockdown: boolean;
+  hideOfflineAgents: boolean;
   toasts: Toast[];
 }
 
@@ -205,6 +206,7 @@ export type DashboardAction =
   | { type: 'TOGGLE_KILLSWITCH' }
   | { type: 'TOGGLE_AGENT_CONTROL' }
   | { type: 'LOCKDOWN' }
+  | { type: 'SET_HIDE_OFFLINE_AGENTS'; value: boolean }
   | { type: 'ADD_TOAST'; toast: Omit<Toast, 'id' | 'ts'> }
   | { type: 'DISMISS_TOAST'; id: string }
   | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }

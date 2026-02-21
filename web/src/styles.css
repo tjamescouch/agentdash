@@ -3369,3 +3369,24 @@ button, .list-item, .channel-tag, .mode-btn, .logs-btn, .pulse-btn {
     max-width: none;
   }
 }
+
+/* ============ Sidebar Hide Offline Toggle ============ */
+
+.sidebar-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sidebar-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.sidebar-toggle input {
+  transform: translateY(1px);
+}

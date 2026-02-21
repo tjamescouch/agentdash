@@ -82,6 +82,7 @@ export const initialState: DashboardState = {
   killSwitchOpen: false,
   agentControlOpen: false,
   lockdown: false,
+  hideOfflineAgents: true,
   toasts: []
 };
 
@@ -242,6 +243,8 @@ export function reducer(state: DashboardState, action: DashboardAction): Dashboa
       return { ...state, agentControlOpen: !state.agentControlOpen };
     case 'LOCKDOWN':
       return { ...state, lockdown: true, killSwitchOpen: false };
+    case 'SET_HIDE_OFFLINE_AGENTS':
+      return { ...state, hideOfflineAgents: action.value };
     case 'ADD_TOAST': {
       const toast: Toast = {
         ...action.toast,
