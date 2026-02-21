@@ -1,5 +1,5 @@
 {
-  "name": "agentctl",
+  "name": "agentdash",
   "version": "1.0.0",
   "private": true,
   "description": "Real-time web dashboard for AgentChat monitoring",
