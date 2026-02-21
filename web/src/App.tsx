@@ -175,12 +175,6 @@ export default function App() {
           </div>
         </div>
         <div className="vm-toolbar">
-          <button className="vm-toolbar-btn" title="Power On" onClick={() => {}}>&#9211;</button>
-          <button className="vm-toolbar-btn" title="Suspend">&#9208;</button>
-          <div className="vm-toolbar-sep" />
-          <button className="vm-toolbar-btn" title="Snapshot">&#128247;</button>
-          <button className="vm-toolbar-btn" title="Settings">&#9881;</button>
-          <div className="vm-toolbar-sep" />
           <button
             className="vm-toolbar-btn active"
             title="Agent Control"
