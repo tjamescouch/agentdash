@@ -197,7 +197,6 @@ export interface DashboardState {
   logsOpen: boolean;
   spend: SpendStats;
   spendOpen: boolean;
-  pulseOpen: boolean;
   killSwitchOpen: boolean;
   agentControlOpen: boolean;
   lockdown: boolean;
@@ -233,7 +232,6 @@ export type DashboardAction =
   | { type: 'CLEAR_LOGS' }
   | { type: 'SPEND'; data: SpendStats }
   | { type: 'TOGGLE_SPEND' }
-  | { type: 'TOGGLE_PULSE' }
   | { type: 'CONNECTION_ERROR'; error: string }
   | { type: 'CONNECTING' }
   | { type: 'TOGGLE_KILLSWITCH' }
