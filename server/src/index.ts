@@ -9,6 +9,7 @@ import crypto from 'crypto';
 import multer from 'multer';
 import nacl from 'tweetnacl';
 import tweetnaclUtil from 'tweetnacl-util';
+import { recordUsage, getUsageSummary, getAgentUsage, getTimeSeries, getEventCount } from './token-usage.js';
 import { parseSpendMessage } from './spend-parser.js';
 
 const { encodeBase64, decodeBase64 } = tweetnaclUtil;
@@ -1629,7 +1630,8 @@ function getStateSnapshot(): Record<string, unknown> {
     proposals: [...state.proposals.values()],
     disputes: [...state.disputes.values()],
     skills: state.skills,
-    dashboardAgent: state.dashboardAgent
+    dashboardAgent: state.dashboardAgent,
+    tokenUsage: getUsageSummary()
   };
 }
 
@@ -2277,6 +2279,7 @@ app.all('/proxy/:agentName/*', async (req: Request, res: Response) => {
       const total = inputTokens + outputTokens;
       if (inputTokens || outputTokens) {
         console.log(`[TOKEN] ${agentName} called ${model}: ${inputTokens} input + ${outputTokens} output = ${total} total tokens`);
+        recordUsage(agentName, model, inputTokens, outputTokens);
         recordTokenUsage(agentName, model, inputTokens, outputTokens);
       }
     } else {
@@ -2291,6 +2294,7 @@ app.all('/proxy/:agentName/*', async (req: Request, res: Response) => {
           const { input_tokens = 0, output_tokens = 0 } = respJson.usage;
           const total = input_tokens + output_tokens;
           console.log(`[TOKEN] ${agentName} called ${model}: ${input_tokens} input + ${output_tokens} output = ${total} total tokens`);
+          recordUsage(agentName, model, input_tokens, output_tokens);
           recordTokenUsage(agentName, model, input_tokens, output_tokens);
         }
       } catch { /* not JSON */ }
@@ -2301,6 +2305,64 @@ app.all('/proxy/:agentName/*', async (req: Request, res: Response) => {
       res.status(502).json({ error: 'Proxy error', message: (err as Error).message });
     }
   }
+});
+
+
+
+// ============ Token Usage API ============
+
+app.get('/api/usage', (_req: Request, res: Response) => {
+  const windowParam = _req.query.window as string | undefined;
+  let windowMs: number | undefined;
+  
+  if (windowParam) {
+    const hours = parseFloat(windowParam);
+    if (!isNaN(hours) && hours > 0) {
+      windowMs = hours * 60 * 60 * 1000;
+    }
+  }
+  
+  const summary = getUsageSummary(windowMs);
+  res.json(summary);
+});
+
+app.get('/api/usage/timeseries', (_req: Request, res: Response) => {
+  const windowParam = _req.query.window as string | undefined;
+  const intervalParam = _req.query.interval as string | undefined;
+  const agent = _req.query.agent as string | undefined;
+  
+  let windowMs: number | undefined;
+  if (windowParam) {
+    const hours = parseFloat(windowParam);
+    if (!isNaN(hours) && hours > 0) windowMs = hours * 60 * 60 * 1000;
+  }
+  
+  let intervalMs = 5 * 60 * 1000; // 5 min default
+  if (intervalParam) {
+    const mins = parseFloat(intervalParam);
+    if (!isNaN(mins) && mins > 0) intervalMs = mins * 60 * 1000;
+  }
+  
+  const series = getTimeSeries(intervalMs, windowMs, agent);
+  res.json({ series, intervalMs, eventCount: getEventCount() });
+});
+
+app.get('/api/usage/:agentName', (req: Request, res: Response) => {
+  const { agentName } = req.params;
+  const windowParam = req.query.window as string | undefined;
+  let windowMs: number | undefined;
+  
+  if (windowParam) {
+    const hours = parseFloat(windowParam);
+    if (!isNaN(hours) && hours > 0) windowMs = hours * 60 * 60 * 1000;
+  }
+  
+  const usage = getAgentUsage(agentName, windowMs);
+  if (!usage) {
+    res.status(404).json({ error: 'No usage data for agent', agent: agentName });
+    return;
+  }
+  res.json(usage);
 });
 
 // Static files (for built React app)

@@ -82,6 +82,9 @@ export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendF
           case 'leaderboard_update':
             dispatch({ type: 'LEADERBOARD_UPDATE', data: msg.data });
             break;
+          case 'token_usage':
+            dispatch({ type: 'TOKEN_USAGE_UPDATE', data: msg.data });
+            break;
           case 'skills_update':
             dispatch({ type: 'SKILLS_UPDATE', data: msg.data });
             break;

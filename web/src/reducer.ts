@@ -1,4 +1,4 @@
-import type { DashboardState, DashboardAction, Message, Toast } from './types';
+import type { DashboardState, DashboardAction, Message, Toast, TokenUsageSummary } from './types';
 
 // ============ Persistence ============
 
@@ -82,6 +82,7 @@ export const initialState: DashboardState = {
   killSwitchOpen: false,
   agentControlOpen: false,
   lockdown: false,
+  tokenUsage: null,
   hideOfflineAgents: true,
   toasts: []
 };
@@ -115,7 +116,8 @@ export function reducer(state: DashboardState, action: DashboardAction): Dashboa
         skills: action.data.skills || [],
         proposals: Object.fromEntries((action.data.proposals || []).map(p => [p.id, p])),
         disputes: Object.fromEntries((action.data.disputes || []).map(d => [d.id, d])),
-        dashboardAgent: action.data.dashboardAgent
+        dashboardAgent: action.data.dashboardAgent,
+        tokenUsage: action.data.tokenUsage || null
       };
     }
     case 'CONNECTED':
@@ -275,6 +277,8 @@ export function reducer(state: DashboardState, action: DashboardAction): Dashboa
       }
       return { ...state, dashboardAgent: agent };
     }
+    case 'TOKEN_USAGE_UPDATE':
+      return { ...state, tokenUsage: action.data as TokenUsageSummary };
     case 'NICK_CHANGED': {
       if (typeof window !== 'undefined') localStorage.setItem('dashboardNick', action.nick);
       return {

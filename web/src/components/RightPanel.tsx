@@ -96,6 +96,78 @@ export function RightPanel({ state, dispatch, send, panelWidth }: { state: Dashb
     );
   }
 
+
+  if (state.rightPanel === 'usage') {
+    const usage = state.tokenUsage;
+    const formatNum = (n: number) => {
+      if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+      if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+      return String(n);
+    };
+    return (
+      <div className="right-panel" style={panelStyle}>
+        <h3>TOKEN USAGE</h3>
+        {!usage || usage.agents.length === 0 ? (
+          <div className="empty">No token usage data yet. Usage is tracked when agents call the Anthropic proxy.</div>
+        ) : (
+          <div className="token-usage-panel">
+            <div className="usage-totals">
+              <div className="usage-stat">
+                <span className="stat-label">Total Tokens</span>
+                <span className="stat-value">{formatNum(usage.totals.totalTokens)}</span>
+              </div>
+              <div className="usage-stat">
+                <span className="stat-label">Requests</span>
+                <span className="stat-value">{formatNum(usage.totals.totalRequests)}</span>
+              </div>
+              <div className="usage-stat">
+                <span className="stat-label">Input</span>
+                <span className="stat-value">{formatNum(usage.totals.inputTokens)}</span>
+              </div>
+              <div className="usage-stat">
+                <span className="stat-label">Output</span>
+                <span className="stat-value">{formatNum(usage.totals.outputTokens)}</span>
+              </div>
+            </div>
+            <div className="usage-agents">
+              {usage.agents.map(agent => {
+                const pct = usage.totals.totalTokens > 0 ? (agent.totalTokens / usage.totals.totalTokens) * 100 : 0;
+                return (
+                  <div key={agent.agent} className="usage-agent-row">
+                    <div className="usage-agent-header">
+                      <span className="usage-agent-name">{agent.agent}</span>
+                      <span className="usage-agent-total">{formatNum(agent.totalTokens)}</span>
+                    </div>
+                    <div className="usage-bar-container">
+                      <div className="usage-bar" style={{ width: `${Math.max(pct, 1)}%` }}>
+                        <div className="usage-bar-input" style={{ width: `${agent.totalInputTokens / agent.totalTokens * 100}%` }} />
+                      </div>
+                    </div>
+                    <div className="usage-agent-detail">
+                      <span>{formatNum(agent.totalInputTokens)} in</span>
+                      <span>{formatNum(agent.totalOutputTokens)} out</span>
+                      <span>{agent.totalRequests} req</span>
+                    </div>
+                    {agent.models.length > 1 && (
+                      <div className="usage-models">
+                        {agent.models.map(m => (
+                          <div key={m.model} className="usage-model-row">
+                            <span className="model-name">{m.model}</span>
+                            <span className="model-tokens">{formatNum(m.totalTokens)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (state.rightPanel === 'disputes') {
     const disputes = Object.values(state.disputes).sort((a, b) => b.updated_at - a.updated_at);
     return (

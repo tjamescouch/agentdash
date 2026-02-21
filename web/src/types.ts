@@ -139,6 +139,38 @@ export interface SpendStats {
   buckets1m?: Array<{ t: number; inputTokens: number; outputTokens: number; totalTokens: number; calls: number }>;
 }
 
+
+export interface TokenModelUsage {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  requestCount: number;
+}
+
+export interface TokenAgentUsage {
+  agent: string;
+  models: TokenModelUsage[];
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalTokens: number;
+  totalRequests: number;
+  firstSeen: number;
+  lastSeen: number;
+}
+
+export interface TokenUsageSummary {
+  agents: TokenAgentUsage[];
+  totals: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    totalRequests: number;
+  };
+  windowStart: number;
+  windowEnd: number;
+}
+
 export interface DashboardState {
   connected: boolean;
   connectionStatus: 'connecting' | 'syncing' | 'ready' | 'error' | 'disconnected';
@@ -169,6 +201,7 @@ export interface DashboardState {
   killSwitchOpen: boolean;
   agentControlOpen: boolean;
   lockdown: boolean;
+  tokenUsage: TokenUsageSummary | null;
   hideOfflineAgents: boolean;
   toasts: Toast[];
 }
@@ -212,7 +245,8 @@ export type DashboardAction =
   | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }
   | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] }
   | { type: 'SET_DASHBOARD_AGENT'; data: { agentId: string; nick: string; publicKey?: string; secretKey?: string } }
-  | { type: 'NICK_CHANGED'; nick: string };
+  | { type: 'NICK_CHANGED'; nick: string }
+  | { type: 'TOKEN_USAGE_UPDATE'; data: TokenUsageSummary };
 
 export interface StateSyncPayload {
   agents: Agent[];
@@ -223,6 +257,7 @@ export interface StateSyncPayload {
   proposals: Proposal[];
   disputes: Dispute[];
   dashboardAgent: DashboardAgent;
+  tokenUsage?: TokenUsageSummary;
 }
 
 export type WsSendFn = (msg: Record<string, unknown>) => void;
