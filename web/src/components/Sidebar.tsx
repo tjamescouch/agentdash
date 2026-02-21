@@ -107,6 +107,7 @@ export function Sidebar({ state, dispatch, sidebarWidth, send }: { state: Dashbo
         <button onClick={() => dispatch({ type: 'SET_RIGHT_PANEL', panel: 'skills' })}>Skills</button>
         <button onClick={() => dispatch({ type: 'SET_RIGHT_PANEL', panel: 'proposals' })}>Proposals</button>
         <button onClick={() => dispatch({ type: 'SET_RIGHT_PANEL', panel: 'disputes' })}>Disputes</button>
+        <button onClick={() => dispatch({ type: 'SET_RIGHT_PANEL', panel: 'usage' })}>Usage</button>
       </div>
     </div>
   );

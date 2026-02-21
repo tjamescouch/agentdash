@@ -3390,3 +3390,133 @@ button, .list-item, .channel-tag, .mode-btn, .logs-btn, .pulse-btn {
 .sidebar-toggle input {
   transform: translateY(1px);
 }
+
+/* ============ Token Usage Panel ============ */
+
+.token-usage-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.usage-totals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.usage-stat {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.usage-stat .stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+
+.usage-stat .stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--accent-green);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.usage-agents {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.usage-agent-row {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 8px;
+}
+
+.usage-agent-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.usage-agent-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.usage-agent-total {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--accent-green);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.usage-bar-container {
+  height: 14px;
+  background: var(--bg-primary);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.usage-bar {
+  height: 100%;
+  background: var(--accent-green);
+  opacity: 0.3;
+  border-radius: 2px;
+  position: relative;
+  transition: width 0.3s ease;
+}
+
+.usage-bar-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--accent-green);
+  opacity: 0.7;
+  border-radius: 2px;
+}
+
+.usage-agent-detail {
+  display: flex;
+  gap: 12px;
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.usage-models {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.usage-model-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+.usage-model-row .model-name {
+  color: var(--accent-yellow);
+}
+
+.usage-model-row .model-tokens {
+  color: var(--text-primary);
+}
