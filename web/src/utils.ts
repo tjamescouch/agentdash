@@ -15,8 +15,8 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/\bAKIA[A-Z0-9]{16}\b/g, '\u{1F512} [aws-key-redacted]'],
   // Generic bearer tokens (long base64-ish strings after "Bearer")
   [/\bBearer\s+[A-Za-z0-9_-]{30,}\b/g, '\u{1F512} [bearer-token-redacted]'],
-  // Generic long hex secrets (64+ chars, likely SHA/HMAC)
-  [/\b[0-9a-f]{64,}\b/gi, '\u{1F512} [secret-redacted]'],
+  // Private keys (hex-encoded, 0x-prefixed, 64 hex chars)
+  [/\b0x[0-9a-f]{64}\b/gi, '\u{1F512} [private-key-redacted]'],
   // Slack tokens
   [/\bxox[bpsar]-[A-Za-z0-9-]{20,}\b/g, '\u{1F512} [slack-token-redacted]'],
   // npm tokens
