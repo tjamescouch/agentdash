@@ -487,6 +487,59 @@ const state = {
 
 let identity: Identity | null = null;
 
+// ============ Activity Tracker ============
+
+interface ActivityEntry {
+  ts: number;
+}
+
+interface AgentActivityStats {
+  entries: ActivityEntry[];
+}
+
+const ACTIVITY_WINDOW_MS = 5 * 60 * 1000; // 5 minute rolling window
+
+const activityTracker = new Map<string, AgentActivityStats>();
+
+function recordActivity(agentId: string): void {
+  const now = Date.now();
+
+  if (!activityTracker.has(agentId)) {
+    activityTracker.set(agentId, { entries: [] });
+  }
+
+  const stats = activityTracker.get(agentId)!;
+  stats.entries.push({ ts: now });
+
+  // Prune old entries
+  const cutoff = now - ACTIVITY_WINDOW_MS;
+  while (stats.entries.length > 0 && stats.entries[0].ts < cutoff) {
+    stats.entries.shift();
+  }
+}
+
+function getActivitySnapshot(): { agents: Record<string, { msgsPerMin: number; msgCount: number }>; totalMsgsPerMin: number } {
+  const now = Date.now();
+  const cutoff = now - ACTIVITY_WINDOW_MS;
+  const agents: Record<string, { msgsPerMin: number; msgCount: number }> = {};
+  let totalMsgsPerMin = 0;
+
+  activityTracker.forEach((stats, agentId) => {
+    // Prune old entries
+    while (stats.entries.length > 0 && stats.entries[0].ts < cutoff) {
+      stats.entries.shift();
+    }
+
+    const windowMinutes = ACTIVITY_WINDOW_MS / 60000;
+    const msgsPerMin = parseFloat((stats.entries.length / windowMinutes).toFixed(1));
+    agents[agentId] = { msgsPerMin, msgCount: stats.entries.length };
+    totalMsgsPerMin += msgsPerMin;
+  });
+
+  totalMsgsPerMin = parseFloat(totalMsgsPerMin.toFixed(1));
+  return { agents, totalMsgsPerMin };
+}
+
 function signMessage(content: string): string | null {
   if (!identity || !identity.secretKey) return null;
   const messageBytes = new TextEncoder().encode(content);
@@ -804,6 +857,7 @@ function handleIncomingMessage(msg: AgentChatMsg): void {
 };
 
   state.channels.get(channel)!.messages.push(message);
+  recordActivity(msg.from!);
   broadcastToDashboards({ type: 'message', data: message });
 }
 
@@ -1282,6 +1336,12 @@ function broadcastToDashboards(msg: { type: string; data?: unknown }): void {
   }
 }
 
+// Broadcast activity stats every 10 seconds
+setInterval(() => {
+  if (dashboardClients.size === 0) return;
+  broadcastToDashboards({ type: 'activity', data: getActivitySnapshot() });
+}, 10000);
+
 function getStateSnapshot(): Record<string, unknown> {
   return {
     agents: [...state.agents.values()].map(a => ({ ...a, channels: [...a.channels] })),
@@ -1293,7 +1353,8 @@ function getStateSnapshot(): Record<string, unknown> {
     messages: Object.fromEntries(
       [...state.channels.entries()].map(([name, ch]) => [name, ch.messages.toArray()])
     ),
-    dashboardAgent: state.dashboardAgent
+    dashboardAgent: state.dashboardAgent,
+    activity: getActivitySnapshot()
   };
 }
 

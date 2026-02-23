@@ -65,6 +65,11 @@ interface LogEntry {
   msg: string;
 }
 
+interface ActivityStats {
+  agents: Record<string, { msgsPerMin: number; msgCount: number }>;
+  totalMsgsPerMin: number;
+}
+
 interface DashboardState {
   connected: boolean;
   connectionStatus: 'connecting' | 'syncing' | 'ready' | 'error' | 'disconnected';
@@ -86,6 +91,7 @@ interface DashboardState {
   logs: LogEntry[];
   logsOpen: boolean;
   pulseOpen: boolean;
+  activity: ActivityStats;
 }
 
 type DashboardAction =
@@ -96,7 +102,7 @@ type DashboardAction =
   | { type: 'AGENT_UPDATE'; data: Agent }
   | { type: 'SET_MODE'; mode: string }
   | { type: 'SELECT_CHANNEL'; channel: string }
-  | { type: 'SELECT_AGENT'; agent: Agent }
+  | { type: 'SELECT_AGENT'; agent: Agent | null }
   | { type: 'SET_RIGHT_PANEL'; panel: string }
   | { type: 'TYPING'; data: { from: string; from_name?: string; channel: string } }
   | { type: 'CLEAR_TYPING'; agentId: string }
@@ -115,7 +121,8 @@ type DashboardAction =
   | { type: 'AGENTS_BULK_UPDATE'; data: Agent[] }
   | { type: 'CHANNELS_BULK_UPDATE'; data: Channel[] }
   | { type: 'SET_DASHBOARD_AGENT'; data: { agentId: string; nick: string; publicKey?: string; secretKey?: string } }
-  | { type: 'NICK_CHANGED'; nick: string };
+  | { type: 'NICK_CHANGED'; nick: string }
+  | { type: 'ACTIVITY'; data: ActivityStats };
 
 interface StateSyncPayload {
   agents: Agent[];
@@ -235,7 +242,8 @@ const initialState: DashboardState = {
   saveModal: null,
   logs: [],
   logsOpen: false,
-  pulseOpen: false
+  pulseOpen: false,
+  activity: { agents: {}, totalMsgsPerMin: 0 }
 };
 
 function reducer(state: DashboardState, action: DashboardAction): DashboardState {
@@ -391,6 +399,8 @@ function reducer(state: DashboardState, action: DashboardAction): DashboardState
           : { id: null, nick: action.nick }
       };
     }
+    case 'ACTIVITY':
+      return { ...state, activity: action.data };
     default:
       return state;
   }
@@ -467,6 +477,7 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
         switch (msg.type) {
           case 'state_sync':
             dispatch({ type: 'STATE_SYNC', data: msg.data });
+            if (msg.data.activity) dispatch({ type: 'ACTIVITY', data: msg.data.activity });
             break;
           case 'connected':
             dispatch({ type: 'CONNECTED', data: msg.data });
@@ -567,6 +578,9 @@ function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
           case 'log_history':
             dispatch({ type: 'LOG_HISTORY', data: msg.data });
             break;
+          case 'activity':
+            dispatch({ type: 'ACTIVITY', data: msg.data });
+            break;
           case 'error':
             console.error('Server error:', msg.data?.code, msg.data?.message);
             if (msg.data?.code === 'LURK_MODE') {
@@ -645,6 +659,10 @@ function useResizable(initialWidth: number, min: number, max: number, side: 'lef
 
 // ============ Components ============
 
+function formatMsgRate(msgsPerMin: number): string {
+  return `${msgsPerMin}/min`;
+}
+
 function TopBar({ state, dispatch, send, theme, setTheme }: { state: DashboardState; dispatch: React.Dispatch<DashboardAction>; send: WsSendFn; theme: Theme; setTheme: (t: Theme) => void }) {
   const cycleTheme = () => {
     const order: Theme[] = ['system', 'light', 'dark'];
@@ -661,6 +679,11 @@ function TopBar({ state, dispatch, send, theme, setTheme }: { state: DashboardSt
         <span className={`status ${state.connected ? 'online' : 'offline'}`}>
           {state.connected ? 'CONNECTED' : 'DISCONNECTED'}
         </span>
+        {state.activity.totalMsgsPerMin > 0 && (
+          <span className="activity-rate" title="Messages per minute (5min rolling avg)">
+            {formatMsgRate(state.activity.totalMsgsPerMin)} msgs
+          </span>
+        )}
       </div>
       <div className="topbar-right">
         {state.dashboardAgent && (
@@ -942,6 +965,16 @@ function RightPanel({ state, dispatch, send, panelWidth }: { state: DashboardSta
   // Agent detail
   const agent = state.selectedAgent;
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && agent) {
+        dispatch({ type: 'SELECT_AGENT', agent: null });
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [agent, dispatch]);
+
   if (!agent) {
     return (
       <div className="right-panel" style={panelStyle}>
@@ -1000,6 +1033,12 @@ function RightPanel({ state, dispatch, send, panelWidth }: { state: DashboardSta
             : <span className="unverified-badge-detail">Unverified</span>
           }
         </div>
+        {state.activity.agents[agent.id] && state.activity.agents[agent.id].msgsPerMin > 0 && (
+          <div className="detail-activity">
+            <span className="label">Activity:</span>
+            <span className="activity-value">{formatMsgRate(state.activity.agents[agent.id].msgsPerMin)} msgs ({state.activity.agents[agent.id].msgCount} in 5min)</span>
+          </div>
+        )}
         {agent.channels && agent.channels.length > 0 && (
           <div className="detail-channels">
             <span className="label">Channels:</span>
