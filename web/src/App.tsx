@@ -793,7 +793,7 @@ function Sidebar({ state, dispatch, sidebarWidth, send }: { state: DashboardStat
     if (!raw) return;
     const channelName = raw.startsWith('#') ? raw : `#${raw}`;
     if (!/^#[a-zA-Z0-9_-]+$/.test(channelName)) return;
-    send({ type: 'join_channel', data: { channel: channelName } });
+    send({ type: 'JOIN', data: { channel: channelName } });
     dispatch({ type: 'SELECT_CHANNEL', channel: channelName });
     setJoinInput('');
   };
