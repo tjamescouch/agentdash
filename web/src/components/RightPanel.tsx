@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import type { DashboardState, DashboardAction, WsSendFn } from '../types';
 import { agentColor, safeUrl, formatTime } from '../utils';
 
@@ -359,6 +359,16 @@ export function RightPanel({ state, dispatch, send, panelWidth }: { state: Dashb
 
   // Agent detail
   const agent = state.selectedAgent;
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && agent) {
+        dispatch({ type: 'SELECT_AGENT', agent: null });
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [agent, dispatch]);
 
   if (!agent) {
     return (

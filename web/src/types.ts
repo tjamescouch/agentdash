@@ -217,7 +217,7 @@ export type DashboardAction =
   | { type: 'SKILLS_UPDATE'; data: Skill[] }
   | { type: 'SET_MODE'; mode: string }
   | { type: 'SELECT_CHANNEL'; channel: string }
-  | { type: 'SELECT_AGENT'; agent: Agent }
+  | { type: 'SELECT_AGENT'; agent: Agent | null }
   | { type: 'SET_RIGHT_PANEL'; panel: string }
   | { type: 'TYPING'; data: { from: string; from_name?: string; channel: string } }
   | { type: 'CLEAR_TYPING'; agentId: string }
