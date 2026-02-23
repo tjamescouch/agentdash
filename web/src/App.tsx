@@ -131,6 +131,8 @@ export default function App() {
       if (e.key === 'Escape' && !isInput) {
         if (state.killSwitchOpen) {
           dispatch({ type: 'TOGGLE_KILLSWITCH' });
+        } else if (state.agentControlOpen) {
+          dispatch({ type: 'TOGGLE_AGENT_CONTROL' });
         } else if (state.sendModal) {
           dispatch({ type: 'HIDE_SEND_MODAL' });
         } else if (state.saveModal) {
@@ -142,7 +144,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [state.channels, state.selectedChannel, state.killSwitchOpen, state.sendModal, state.saveModal, dispatch]);
+  }, [state.channels, state.selectedChannel, state.killSwitchOpen, state.agentControlOpen, state.sendModal, state.saveModal, dispatch]);
 
   return (
     <DashboardContext.Provider value={{ state, dispatch, send }}>
