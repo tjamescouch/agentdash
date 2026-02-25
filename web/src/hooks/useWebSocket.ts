@@ -5,6 +5,7 @@ import { getSavedChannels } from '../reducer';
 
 export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendFn {
   const ws = useRef<WebSocket | null>(null);
+  const sendQueue = useRef<Record<string, unknown>[]>([]);
   const [send, setSend] = useState<WsSendFn>(() => () => {});
 
   useEffect(() => {
@@ -13,6 +14,18 @@ export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendF
       : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
 
     let reconnectDelay = 2000;
+
+    function flushQueue() {
+      if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+      const count = sendQueue.current.length;
+      while (sendQueue.current.length > 0) {
+        const queued = sendQueue.current.shift()!;
+        ws.current.send(JSON.stringify(queued));
+      }
+      if (count > 0) {
+        dispatch({ type: 'ADD_TOAST', toast: { message: `Sent ${count} queued message${count > 1 ? 's' : ''}`, type: 'success', duration: 3000 } });
+      }
+    }
 
     function connect() {
       dispatch({ type: 'CONNECTING' });
@@ -37,12 +50,17 @@ export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendF
                   identity
                 }
               }));
+              // Flush queued messages only after identity is established
+              flushQueue();
             }
           }).catch(err => {
             console.error('Failed to generate identity:', err);
             // Fall back to lurk mode if crypto fails
             localStorage.setItem('dashboardMode', 'lurk');
           });
+        } else {
+          // Lurk mode: no auth needed, flush immediately
+          flushQueue();
         }
       };
 
@@ -212,16 +230,9 @@ export function useWebSocket(dispatch: React.Dispatch<DashboardAction>): WsSendF
         if (ws.current?.readyState === WebSocket.OPEN) {
           ws.current.send(JSON.stringify(msg));
         } else {
-          console.warn('WebSocket not ready, buffering message');
-          // Wait for next tick and retry once
-          setTimeout(() => {
-            if (ws.current?.readyState === WebSocket.OPEN) {
-              ws.current.send(JSON.stringify(msg));
-            } else {
-              console.error('WebSocket still not ready after retry');
-              dispatch({ type: 'ADD_TOAST', toast: { message: 'Connection lost — message not sent', type: 'error', duration: 3000 } });
-            }
-          }, 100);
+          // Queue the message — it will be flushed when the connection reopens
+          sendQueue.current.push(msg);
+          dispatch({ type: 'ADD_TOAST', toast: { message: 'Reconnecting — message will be sent when connection restores', type: 'warning', duration: 4000 } });
         }
       });
     }
